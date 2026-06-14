@@ -1,4 +1,4 @@
-import { Model, UpdateQuery, QueryOptions, Document, QueryFilter } from 'mongoose';
+import { Model, UpdateQuery, QueryOptions, Document, QueryFilter, Types } from 'mongoose';
 
 export class BaseTenantRepository<T extends Document> {
   constructor(protected readonly model: Model<T>) {}
@@ -6,7 +6,8 @@ export class BaseTenantRepository<T extends Document> {
   protected getScopedFilter(orgId: string, filter: QueryFilter<T> = {}): QueryFilter<T> {
     // If orgId is not provided (e.g. Super Admin query with bypass), return raw filter
     if (!orgId) return filter;
-    return { ...filter, organizationId: orgId } as QueryFilter<T>;
+    const organizationId = Types.ObjectId.isValid(orgId) ? new Types.ObjectId(orgId) : orgId;
+    return { ...filter, organizationId } as any;
   }
 
   async find(orgId: string, filter: QueryFilter<T> = {}, options?: QueryOptions): Promise<T[]> {
@@ -22,9 +23,10 @@ export class BaseTenantRepository<T extends Document> {
   }
 
   async create(orgId: string, doc: Partial<T>): Promise<T> {
+    const organizationId = Types.ObjectId.isValid(orgId) ? new Types.ObjectId(orgId) : orgId;
     const created = new this.model({
       ...doc,
-      organizationId: orgId,
+      organizationId,
     });
     return created.save() as Promise<T>;
   }

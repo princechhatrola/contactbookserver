@@ -16,7 +16,7 @@ import { TagsModule } from '../tags/tags.module';
     ]),
     TagsModule,
   ],
-  controllers: [ContactsController, CustomFieldsController],
+  controllers: [CustomFieldsController, ContactsController],
   providers: [ContactsService, CustomFieldsService],
   exports: [ContactsService, CustomFieldsService],
 })
