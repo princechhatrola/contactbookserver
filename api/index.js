@@ -1,16 +1,16 @@
-import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { ExpressAdapter } from '@nestjs/platform-express';
-import express from 'express';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+// Import reflect-metadata at the top
+require('reflect-metadata');
+const { NestFactory } = require('@nestjs/core');
+const { ExpressAdapter } = require('@nestjs/platform-express');
+const express = require('express');
+const { DocumentBuilder, SwaggerModule } = require('@nestjs/swagger');
 
-// Import the pre-compiled AppModule and DatadogLogger from dist
-// This bypasses esbuild's issues with emitDecoratorMetadata since tsc already compiled these.
-import { AppModule } from '../dist/app.module.js';
-import { DatadogLogger } from '../dist/common/logger/datadog.logger.js';
+// Require the pre-compiled AppModule and DatadogLogger from dist
+const { AppModule } = require('../dist/app.module');
+const { DatadogLogger } = require('../dist/common/logger/datadog.logger');
 
 const expressApp = express();
-let cachedServer: any;
+let cachedServer;
 
 async function bootstrap() {
   const app = await NestFactory.create(
@@ -38,7 +38,7 @@ async function bootstrap() {
   return expressApp;
 }
 
-export default async (req: any, res: any) => {
+module.exports = async (req, res) => {
   if (!cachedServer) {
     cachedServer = await bootstrap();
   }
