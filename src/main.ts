@@ -24,6 +24,26 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  await app.listen(process.env.PORT ?? 3001);
+  await app.init();
+
+  if (process.env.VERCEL !== '1') {
+    await app.listen(process.env.PORT ?? 3001);
+  }
+
+  return app;
 }
-bootstrap();
+
+// Support Vercel serverless deployment
+let server: any;
+const handler = async (req: any, res: any) => {
+  if (!server) {
+    const app = await bootstrap();
+    server = app.getHttpAdapter().getInstance();
+  }
+  return server(req, res);
+};
+export default handler;
+
+if (process.env.VERCEL !== '1') {
+  bootstrap();
+}
