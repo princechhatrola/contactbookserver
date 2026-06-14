@@ -50,7 +50,10 @@ export class ExportProcessor extends WorkerHost {
     });
 
     // Make sure output folder exists
-    const orgExportDir = path.join(process.cwd(), 'uploads', 'exports', orgId);
+    const baseExportDir = process.env.VERCEL === '1'
+      ? path.join('/tmp', 'uploads', 'exports')
+      : path.join(process.cwd(), 'uploads', 'exports');
+    const orgExportDir = path.join(baseExportDir, orgId);
     if (!fs.existsSync(orgExportDir)) {
       fs.mkdirSync(orgExportDir, { recursive: true });
     }

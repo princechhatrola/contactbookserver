@@ -39,7 +39,10 @@ export class ImportProcessor extends WorkerHost {
     await importHistory.save();
 
     // Verify file exists
-    const filePath = path.join(process.cwd(), 'uploads', 'imports', fileId);
+    const baseUploadDir = process.env.VERCEL === '1'
+      ? path.join('/tmp', 'uploads', 'imports')
+      : path.join(process.cwd(), 'uploads', 'imports');
+    const filePath = path.join(baseUploadDir, fileId);
     if (!fs.existsSync(filePath)) {
       importHistory.status = ImportStatus.FAILED;
       importHistory.rowErrors.push({

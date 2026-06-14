@@ -35,7 +35,8 @@ export class NotesController {
         destination: (req: any, file: any, cb: any) => {
           // req.user contains JWT user details from auth guard
           const orgId = req.user?.organizationId || 'unassigned';
-          const uploadPath = `./uploads/${orgId}`;
+          const baseUploadPath = process.env.VERCEL === '1' ? '/tmp/uploads' : './uploads';
+          const uploadPath = `${baseUploadPath}/${orgId}`;
           fs.mkdirSync(uploadPath, { recursive: true });
           cb(null, uploadPath);
         },

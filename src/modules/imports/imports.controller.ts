@@ -9,7 +9,9 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { getFilePreview } from './utils/preview.util';
 
 // Ensure upload directory exists
-const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'imports');
+const UPLOAD_DIR = process.env.VERCEL === '1'
+  ? path.join('/tmp', 'uploads', 'imports')
+  : path.join(process.cwd(), 'uploads', 'imports');
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
