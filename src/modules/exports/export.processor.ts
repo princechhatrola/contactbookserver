@@ -31,7 +31,7 @@ export class ExportProcessor extends WorkerHost {
   }
 
   async process(job: Job<any, any, string>): Promise<any> {
-    const { jobId, orgId, userId, entityType, format } = job.data;
+    const { jobId, orgId, userId, entityType, format, groupId } = job.data;
 
     const exportJob = await this.exportJobModel.findById(jobId);
     if (!exportJob) {
@@ -57,15 +57,27 @@ export class ExportProcessor extends WorkerHost {
 
     const uniqueId = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const extension = format.toLowerCase();
-    const fileName = `${entityType.toLowerCase()}-export-${uniqueId}.${extension}`;
+
+    let groupName = '';
+    if (groupId) {
+      const groupDoc = await this.groupModel.findById(groupId).exec();
+      if (groupDoc) {
+        groupName = groupDoc.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      }
+    }
+    const prefix = groupId && groupName ? `contacts-group-${groupName}` : entityType.toLowerCase();
+    const fileName = `${prefix}-export-${uniqueId}.${extension}`;
     const filePath = path.join(orgExportDir, fileName);
 
     try {
       // 1. Query Data
       let records: any[] = [];
-      const queryFilter = { organizationId: new Types.ObjectId(orgId) };
+      const queryFilter: any = { organizationId: new Types.ObjectId(orgId) };
 
       if (entityType === ExportEntityType.CONTACTS) {
+        if (groupId) {
+          queryFilter.groups = new Types.ObjectId(groupId);
+        }
         const docs = await this.contactModel.find(queryFilter).exec();
         records = docs.map(doc => ({
           ID: doc._id.toString(),

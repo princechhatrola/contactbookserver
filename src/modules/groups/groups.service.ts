@@ -36,8 +36,21 @@ export class GroupsService extends BaseTenantRepository<GroupDocument> {
     });
   }
 
-  async getGroups(orgId: string): Promise<GroupDocument[]> {
-    return this.find(orgId, {}, { sort: { name: 1 } });
+  async getGroups(orgId: string): Promise<any[]> {
+    const groups = await this.find(orgId, {}, { sort: { name: 1 } });
+    const result = await Promise.all(
+      groups.map(async (g) => {
+        const count = await this.contactModel.countDocuments({
+          organizationId: new Types.ObjectId(orgId),
+          groups: g._id,
+        }).exec();
+        return {
+          ...g.toObject(),
+          contactCount: count,
+        };
+      })
+    );
+    return result;
   }
 
   async getGroup(orgId: string, groupId: string): Promise<GroupDocument> {

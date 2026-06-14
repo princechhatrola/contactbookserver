@@ -122,7 +122,15 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
       updateData.groups = dto.groups.map(g => new Types.ObjectId(g));
     }
 
-    const updated = await this.update(orgId, contactId, updateData);
+    const updated = await this.contactModel
+      .findOneAndUpdate(
+        this.getScopedFilter(orgId, { _id: contactId } as any),
+        updateData,
+        { new: true },
+      )
+      .populate('ownerId', 'firstName lastName email')
+      .populate('groups', 'name')
+      .exec();
     if (!updated) {
       throw new NotFoundException(`Contact with ID ${contactId} not found`);
     }

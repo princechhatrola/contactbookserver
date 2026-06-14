@@ -35,6 +35,9 @@ export class ImportHistory {
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdBy: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Group', required: false })
+  groupId?: Types.ObjectId;
 }
 
 export const ImportHistorySchema = SchemaFactory.createForClass(ImportHistory);

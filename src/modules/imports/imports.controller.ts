@@ -87,6 +87,7 @@ export class ImportsController {
       fileId: string;
       columnMapping: Record<string, string>;
       duplicateStrategy: 'skip' | 'overwrite';
+      groupId?: string;
     },
   ) {
     if (!dto.fileId || !dto.columnMapping || !dto.duplicateStrategy || !dto.fileName) {
@@ -106,6 +107,7 @@ export class ImportsController {
       dto.fileId,
       dto.columnMapping,
       dto.duplicateStrategy,
+      dto.groupId,
     );
   }
 

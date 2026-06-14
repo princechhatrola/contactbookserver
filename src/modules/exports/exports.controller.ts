@@ -20,13 +20,14 @@ export class ExportsController {
     @Body() dto: {
       entityType: ExportEntityType;
       format: ExportFormat;
+      groupId?: string;
     },
   ) {
     if (!dto.entityType || !dto.format) {
       throw new BadRequestException('entityType and format are required');
     }
 
-    return this.exportsService.createJob(orgId, userId, dto.entityType, dto.format);
+    return this.exportsService.createJob(orgId, userId, dto.entityType, dto.format, dto.groupId);
   }
 
   @Get('history')

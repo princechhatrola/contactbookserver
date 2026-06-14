@@ -19,6 +19,7 @@ export class ExportsService {
     userId: string,
     entityType: ExportEntityType,
     format: ExportFormat,
+    groupId?: string,
   ): Promise<ExportJobDocument> {
     const job = await this.exportJobModel.create({
       organizationId: new Types.ObjectId(orgId),
@@ -26,6 +27,7 @@ export class ExportsService {
       format,
       status: ExportStatus.PENDING,
       createdBy: new Types.ObjectId(userId),
+      groupId: groupId ? new Types.ObjectId(groupId) : undefined,
     });
 
     await this.exportQueue.add('process-export', {
@@ -34,6 +36,7 @@ export class ExportsService {
       userId,
       entityType,
       format,
+      groupId,
     });
 
     return job;

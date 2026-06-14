@@ -25,7 +25,7 @@ export class ImportProcessor extends WorkerHost {
   }
 
   async process(job: Job<any, any, string>): Promise<any> {
-    const { jobId, orgId, userId, fileId, duplicateStrategy } = job.data;
+    const { jobId, orgId, userId, fileId, duplicateStrategy, groupId } = job.data;
     const columnMapping = job.data.columnMapping as Record<string, string>;
 
     // Load import job from DB
@@ -136,11 +136,26 @@ export class ImportProcessor extends WorkerHost {
                 successCount++; // Count skipped duplicate as processed success
                 continue;
               } else if (duplicateStrategy === 'overwrite') {
+                if (groupId) {
+                  const currentGroups = existingContact.groups
+                    ? existingContact.groups.map((g: any) => (g._id ? g._id.toString() : g.toString()))
+                    : [];
+                  if (!currentGroups.includes(groupId)) {
+                    contactDto.groups = [...currentGroups, groupId];
+                  }
+                }
                 // Update existing contact using ContactsService
                 await this.contactsService.updateContact(orgId, userId, existingContact._id.toString(), contactDto);
                 successCount++;
                 continue;
               }
+            }
+          }
+
+          if (groupId) {
+            contactDto.groups = contactDto.groups || [];
+            if (!contactDto.groups.includes(groupId)) {
+              contactDto.groups.push(groupId);
             }
           }
 

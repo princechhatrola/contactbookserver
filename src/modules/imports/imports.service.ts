@@ -21,12 +21,14 @@ export class ImportsService {
     fileId: string,
     columnMapping: Record<string, string>,
     duplicateStrategy: 'skip' | 'overwrite',
+    groupId?: string,
   ): Promise<ImportHistoryDocument> {
     const job = await this.importHistoryModel.create({
       organizationId: new Types.ObjectId(orgId),
       fileName,
       status: ImportStatus.PENDING,
       createdBy: new Types.ObjectId(userId),
+      groupId: groupId ? new Types.ObjectId(groupId) : undefined,
     });
 
     // Add to BullMQ queue
@@ -37,6 +39,7 @@ export class ImportsService {
       fileId,
       columnMapping,
       duplicateStrategy,
+      groupId,
     });
 
     return job;

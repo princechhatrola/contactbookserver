@@ -48,6 +48,9 @@ export class ExportJob {
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdBy: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Group', required: false })
+  groupId?: Types.ObjectId;
 }
 
 export const ExportJobSchema = SchemaFactory.createForClass(ExportJob);
