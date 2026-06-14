@@ -1,0 +1,80 @@
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import * as bcrypt from 'bcrypt';
+import { User, UserDocument } from './schemas/user.schema';
+
+@Injectable()
+export class UsersService {
+  constructor(
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
+  ) {}
+
+  async create(userData: Partial<User>): Promise<UserDocument> {
+    if (userData.email) {
+      const existing = await this.userModel.findOne({ email: userData.email.toLowerCase() });
+      if (existing) {
+        throw new ConflictException(`User with email ${userData.email} already exists`);
+      }
+    }
+
+    // Hash password if provided
+    let passwordHash = userData.passwordHash;
+    if (userData.passwordHash && !userData.passwordHash.startsWith('$2b$')) {
+      passwordHash = await bcrypt.hash(userData.passwordHash, 12);
+    }
+
+    const createdUser = new this.userModel({
+      ...userData,
+      email: userData.email?.toLowerCase(),
+      passwordHash,
+    });
+
+    return createdUser.save();
+  }
+
+  async findByEmail(email: string): Promise<UserDocument | null> {
+    return this.userModel.findOne({ email: email.toLowerCase() }).exec();
+  }
+
+  async findById(id: string): Promise<UserDocument> {
+    const user = await this.userModel.findById(id).exec();
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    return user;
+  }
+
+  async update(id: string, updateData: Partial<User>): Promise<UserDocument> {
+    // If updating email, check for conflicts
+    if (updateData.email) {
+      const normalizedEmail = updateData.email.toLowerCase();
+      const existing = await this.userModel.findOne({ email: normalizedEmail, _id: { $ne: id } });
+      if (existing) {
+        throw new ConflictException(`User with email ${updateData.email} already exists`);
+      }
+      updateData.email = normalizedEmail;
+    }
+
+    // If updating password, hash it
+    if (updateData.passwordHash && !updateData.passwordHash.startsWith('$2b$')) {
+      updateData.passwordHash = await bcrypt.hash(updateData.passwordHash, 12);
+    }
+
+    const updated = await this.userModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
+    if (!updated) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    return updated;
+  }
+
+  async updateRefreshToken(userId: string, refreshToken: string | null): Promise<void> {
+    const refreshTokenHash = refreshToken ? await bcrypt.hash(refreshToken, 10) : undefined;
+    await this.userModel.findByIdAndUpdate(userId, { refreshTokenHash }).exec();
+  }
+
+  async findByOrganization(orgId: string): Promise<UserDocument[]> {
+    return this.userModel.find({ organizationId: orgId }).exec();
+  }
+}
