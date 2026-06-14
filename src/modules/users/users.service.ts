@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument } from './schemas/user.schema';
 
@@ -75,6 +75,13 @@ export class UsersService {
   }
 
   async findByOrganization(orgId: string): Promise<UserDocument[]> {
-    return this.userModel.find({ organizationId: orgId }).exec();
+    return this.userModel.find({ organizationId: new Types.ObjectId(orgId) }).exec();
+  }
+
+  async delete(id: string): Promise<void> {
+    const result = await this.userModel.findByIdAndDelete(id).exec();
+    if (!result) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
   }
 }
