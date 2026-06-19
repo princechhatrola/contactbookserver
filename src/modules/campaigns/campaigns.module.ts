@@ -3,13 +3,23 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { EmailProvider, EmailProviderSchema } from './schemas/email-provider.schema';
 import { SenderIdentity, SenderIdentitySchema } from './schemas/sender-identity.schema';
 import { DomainAuthentication, DomainAuthenticationSchema } from './schemas/domain-authentication.schema';
+import { EmailTemplate, EmailTemplateSchema } from './schemas/email-template.schema';
+import { SuppressionList, SuppressionListSchema } from './schemas/suppression-list.schema';
+import { Contact, ContactSchema } from '../contacts/schemas/contact.schema';
+import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
 import { EncryptionService } from './services/encryption.service';
 import { EmailProvidersService } from './services/email-providers.service';
 import { SenderIdentitiesService } from './services/sender-identities.service';
 import { DomainAuthenticationsService } from './services/domain-authentications.service';
+import { EmailTemplatesService } from './services/email-templates.service';
+import { SuppressionListService } from './services/suppression-list.service';
+import { AudienceCompilerService } from './services/audience-compiler.service';
 import { EmailProvidersController } from './email-providers.controller';
 import { SenderIdentitiesController } from './sender-identities.controller';
 import { DomainAuthenticationsController } from './domain-authentications.controller';
+import { EmailTemplatesController } from './email-templates.controller';
+import { SuppressionListController } from './suppression-list.controller';
+import { AudienceController } from './audience.controller';
 
 @Module({
   imports: [
@@ -17,10 +27,38 @@ import { DomainAuthenticationsController } from './domain-authentications.contro
       { name: EmailProvider.name, schema: EmailProviderSchema },
       { name: SenderIdentity.name, schema: SenderIdentitySchema },
       { name: DomainAuthentication.name, schema: DomainAuthenticationSchema },
+      { name: EmailTemplate.name, schema: EmailTemplateSchema },
+      { name: SuppressionList.name, schema: SuppressionListSchema },
+      { name: Contact.name, schema: ContactSchema },
+      { name: Lead.name, schema: LeadSchema },
     ]),
   ],
-  controllers: [EmailProvidersController, SenderIdentitiesController, DomainAuthenticationsController],
-  providers: [EncryptionService, EmailProvidersService, SenderIdentitiesService, DomainAuthenticationsService],
-  exports: [MongooseModule, EncryptionService, EmailProvidersService, SenderIdentitiesService, DomainAuthenticationsService],
+  controllers: [
+    EmailProvidersController, 
+    SenderIdentitiesController, 
+    DomainAuthenticationsController, 
+    EmailTemplatesController,
+    SuppressionListController,
+    AudienceController
+  ],
+  providers: [
+    EncryptionService, 
+    EmailProvidersService, 
+    SenderIdentitiesService, 
+    DomainAuthenticationsService, 
+    EmailTemplatesService,
+    SuppressionListService,
+    AudienceCompilerService
+  ],
+  exports: [
+    MongooseModule, 
+    EncryptionService, 
+    EmailProvidersService, 
+    SenderIdentitiesService, 
+    DomainAuthenticationsService, 
+    EmailTemplatesService,
+    SuppressionListService,
+    AudienceCompilerService
+  ],
 })
 export class CampaignsModule {}
