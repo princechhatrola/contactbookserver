@@ -39,6 +39,16 @@ async function bootstrap() {
 }
 
 module.exports = async (req, res) => {
+  const origin = req.headers.origin || '*';
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.status(200).end();
+    return;
+  }
+
   if (!cachedServer) {
     cachedServer = await bootstrap();
   }

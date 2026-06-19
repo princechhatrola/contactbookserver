@@ -36,6 +36,16 @@ async function bootstrap() {
 // Support Vercel serverless deployment
 let server: any;
 const handler = async (req: any, res: any) => {
+  const origin = req.headers.origin || '*';
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.status(200).end();
+    return;
+  }
+
   if (!server) {
     const app = await bootstrap();
     server = app.getHttpAdapter().getInstance();
