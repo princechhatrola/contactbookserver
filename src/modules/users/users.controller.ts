@@ -7,6 +7,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole, UserStatus } from './schemas/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -62,6 +63,25 @@ export class UsersController {
       phone: user.phone,
       role: user.role,
       status: user.status,
+    };
+  }
+
+  @Patch('me/profile')
+  @ApiOperation({ summary: 'Update current user\'s profile name and/or password' })
+  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
+  async updateProfile(
+    @GetUser('userId') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const updated = await this.usersService.updateProfile(userId, dto);
+    return {
+      id: updated._id,
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      email: updated.email,
+      phone: updated.phone,
+      role: updated.role,
+      status: updated.status,
     };
   }
 

@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument } from './schemas/user.schema';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
@@ -60,6 +61,31 @@ export class UsersService {
     // If updating password, hash it
     if (updateData.passwordHash && !updateData.passwordHash.startsWith('$2b$')) {
       updateData.passwordHash = await bcrypt.hash(updateData.passwordHash, 12);
+    }
+
+    const updated = await this.userModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
+    if (!updated) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    return updated;
+  }
+
+  async updateProfile(id: string, dto: UpdateProfileDto): Promise<UserDocument> {
+    const user = await this.findById(id);
+    const updateData: Partial<User> = {};
+
+    if (dto.firstName) updateData.firstName = dto.firstName;
+    if (dto.lastName) updateData.lastName = dto.lastName;
+
+    if (dto.password) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('Current password is required to change password');
+      }
+      const passwordMatches = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+      if (!passwordMatches) {
+        throw new BadRequestException('Invalid current password');
+      }
+      updateData.passwordHash = await bcrypt.hash(dto.password, 12);
     }
 
     const updated = await this.userModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
