@@ -79,7 +79,9 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
   }
 
   async getContact(orgId: string, contactId: string): Promise<ContactDocument> {
-    const contact = await this.findById(orgId, contactId);
+    const contact = await this.contactModel.findOne(
+      this.getScopedFilter(orgId, { _id: contactId, isDeleted: { $ne: true } } as any)
+    ).exec();
     if (!contact) {
       throw new NotFoundException(`Contact with ID ${contactId} not found`);
     }
@@ -87,7 +89,9 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
   }
 
   async updateContact(orgId: string, userId: string, contactId: string, dto: UpdateContactDto): Promise<ContactDocument> {
-    const contact = await this.findById(orgId, contactId);
+    const contact = await this.contactModel.findOne(
+      this.getScopedFilter(orgId, { _id: contactId, isDeleted: { $ne: true } } as any)
+    ).exec();
     if (!contact) {
       throw new NotFoundException(`Contact with ID ${contactId} not found`);
     }
@@ -124,7 +128,7 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
 
     const updated = await this.contactModel
       .findOneAndUpdate(
-        this.getScopedFilter(orgId, { _id: contactId } as any),
+        this.getScopedFilter(orgId, { _id: contactId, isDeleted: { $ne: true } } as any),
         updateData,
         { new: true },
       )
@@ -162,11 +166,17 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
   }
 
   async removeContact(orgId: string, userId: string, contactId: string): Promise<void> {
-    const contact = await this.findById(orgId, contactId);
+    const contact = await this.contactModel.findOne(
+      this.getScopedFilter(orgId, { _id: contactId, isDeleted: { $ne: true } } as any)
+    ).exec();
     if (!contact) {
       throw new NotFoundException(`Contact with ID ${contactId} not found`);
     }
-    const deleted = await this.delete(orgId, contactId);
+    const deleted = await this.contactModel.findOneAndUpdate(
+      this.getScopedFilter(orgId, { _id: contactId } as any),
+      { isDeleted: true, updatedBy: new Types.ObjectId(userId) },
+      { new: true }
+    ).exec();
     if (!deleted) {
       throw new NotFoundException(`Contact with ID ${contactId} not found`);
     }
@@ -203,6 +213,7 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
 
     const filter: QueryFilter<ContactDocument> = {
       organizationId: new Types.ObjectId(orgId),
+      isDeleted: { $ne: true },
     };
 
     // Global text searching
@@ -306,4 +317,33 @@ export class ContactsService extends BaseTenantRepository<ContactDocument> {
 
     return result.modifiedCount;
   }
+
+  async deleteContacts(orgId: string, userId: string, contactIds: string[]): Promise<number> {
+    const objectIds = contactIds.map(id => new Types.ObjectId(id));
+    const result = await this.contactModel.updateMany(
+      {
+        _id: { $in: objectIds },
+        organizationId: new Types.ObjectId(orgId),
+        isDeleted: { $ne: true },
+      },
+      { isDeleted: true, updatedBy: new Types.ObjectId(userId) }
+    ).exec();
+
+    if (result.modifiedCount > 0) {
+      // Emit audit log event
+      this.auditLogEmitter.emit('audit.log', {
+        orgId,
+        userId,
+        action: 'contact.bulk_delete',
+        description: `Bulk deleted ${result.modifiedCount} contacts`,
+        metadata: {
+          contactIds,
+          deletedCount: result.modifiedCount,
+        },
+      });
+    }
+
+    return result.modifiedCount;
+  }
 }
+

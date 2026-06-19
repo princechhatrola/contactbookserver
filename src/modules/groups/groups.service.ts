@@ -43,6 +43,7 @@ export class GroupsService extends BaseTenantRepository<GroupDocument> {
         const count = await this.contactModel.countDocuments({
           organizationId: new Types.ObjectId(orgId),
           groups: g._id,
+          isDeleted: { $ne: true },
         }).exec();
         return {
           ...g.toObject(),
@@ -115,7 +116,7 @@ export class GroupsService extends BaseTenantRepository<GroupDocument> {
 
     const objectIds = contactIds.map(id => new Types.ObjectId(id));
     const result = await this.contactModel.updateMany(
-      { _id: { $in: objectIds }, organizationId: new Types.ObjectId(orgId) },
+      { _id: { $in: objectIds }, organizationId: new Types.ObjectId(orgId), isDeleted: { $ne: true } },
       { $addToSet: { groups: new Types.ObjectId(groupId) } }
     ).exec();
 
@@ -131,7 +132,7 @@ export class GroupsService extends BaseTenantRepository<GroupDocument> {
 
     const objectIds = contactIds.map(id => new Types.ObjectId(id));
     const result = await this.contactModel.updateMany(
-      { _id: { $in: objectIds }, organizationId: new Types.ObjectId(orgId) },
+      { _id: { $in: objectIds }, organizationId: new Types.ObjectId(orgId), isDeleted: { $ne: true } },
       { $pull: { groups: new Types.ObjectId(groupId) } }
     ).exec();
 

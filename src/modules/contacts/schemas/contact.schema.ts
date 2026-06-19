@@ -98,6 +98,9 @@ export class Contact {
 
   @Prop({ type: [String], default: [], index: true })
   tags: string[];
+
+  @Prop({ type: Boolean, default: false, index: true })
+  isDeleted: boolean;
 }
 
 export const ContactSchema = SchemaFactory.createForClass(Contact);

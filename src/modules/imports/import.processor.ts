@@ -131,6 +131,7 @@ export class ImportProcessor extends WorkerHost {
             const existingContact = await this.contactModel.findOne({
               organizationId: new Types.ObjectId(orgId),
               email: contactDto.email.toLowerCase(),
+              isDeleted: { $ne: true },
             }).exec();
 
             if (existingContact) {

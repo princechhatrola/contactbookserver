@@ -123,4 +123,19 @@ export class ContactsController {
     const modifiedCount = await this.contactsService.removeTagsFromContacts(orgId, userId, contactIds, tags);
     return { success: true, modifiedCount };
   }
+
+  @Post('bulk-delete')
+  @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk delete contacts (Org Admin or Manager only)' })
+  @ApiResponse({ status: 200, description: 'Contacts deleted successfully' })
+  async bulkDelete(
+    @GetUser('organizationId') orgId: string,
+    @GetUser('userId') userId: string,
+    @Body('contactIds') contactIds: string[],
+  ) {
+    const deletedCount = await this.contactsService.deleteContacts(orgId, userId, contactIds);
+    return { success: true, deletedCount };
+  }
 }
+

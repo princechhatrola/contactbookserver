@@ -78,6 +78,7 @@ export class ExportProcessor extends WorkerHost {
       const queryFilter: any = { organizationId: new Types.ObjectId(orgId) };
 
       if (entityType === ExportEntityType.CONTACTS) {
+        queryFilter.isDeleted = { $ne: true };
         if (groupId) {
           queryFilter.groups = new Types.ObjectId(groupId);
         }

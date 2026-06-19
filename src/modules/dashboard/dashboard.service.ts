@@ -24,7 +24,7 @@ export class DashboardService {
 
     const [totalContacts, totalLeads, leadStats, activeTasks] = await Promise.all([
       // 1. Total Contacts count
-      this.contactModel.countDocuments({ organizationId: orgObjectId }).exec(),
+      this.contactModel.countDocuments({ organizationId: orgObjectId, isDeleted: { $ne: true } }).exec(),
       
       // 2. Total Leads count
       this.leadModel.countDocuments({ organizationId: orgObjectId }).exec(),
@@ -79,7 +79,7 @@ export class DashboardService {
 
     // Aggregate contacts owned by each team member
     const contactAggregation = await this.contactModel.aggregate([
-      { $match: { organizationId: orgObjectId, ownerId: { $ne: null } } },
+      { $match: { organizationId: orgObjectId, ownerId: { $ne: null }, isDeleted: { $ne: true } } },
       { $group: { _id: '$ownerId', contactsCount: { $sum: 1 } } },
     ]).exec();
 
