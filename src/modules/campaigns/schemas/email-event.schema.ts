@@ -17,7 +17,7 @@ export class EmailEvent {
   @Prop({ type: Types.ObjectId, ref: 'Contact', required: true, index: true })
   contactId: Types.ObjectId;
 
-  @Prop({ required: true, type: String, enum: ['open', 'click', 'bounce', 'complaint'], index: true })
+  @Prop({ required: true, type: String, enum: ['open', 'click', 'bounce', 'complaint', 'reply', 'unsubscribe'], index: true })
   eventType: string;
 
   @Prop({ trim: true })

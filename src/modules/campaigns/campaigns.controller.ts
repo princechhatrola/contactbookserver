@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CampaignsService } from './services/campaigns.service';
+import { CampaignAnalyticsService } from './services/campaign-analytics.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -12,7 +13,22 @@ import { UserRole } from '../users/schemas/user.schema';
 @Controller('campaigns')
 @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER)
 export class CampaignsController {
-  constructor(private readonly campaignsService: CampaignsService) {}
+  constructor(
+    private readonly campaignsService: CampaignsService,
+    private readonly analyticsService: CampaignAnalyticsService,
+  ) {}
+
+  @Get('analytics')
+  @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+  @ApiOperation({ summary: 'Get campaign overview analytics & visualizations' })
+  async getCampaignAnalytics(
+    @GetUser('organizationId') orgId: string,
+    @Query('campaignId') campaignId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.analyticsService.getAnalytics(orgId, campaignId, startDate, endDate);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a new campaign draft' })

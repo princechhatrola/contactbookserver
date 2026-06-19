@@ -20,6 +20,7 @@ import { SuppressionListService } from './services/suppression-list.service';
 import { AudienceCompilerService } from './services/audience-compiler.service';
 import { CampaignsService } from './services/campaigns.service';
 import { CampaignSchedulerService } from './services/campaign-scheduler.service';
+import { CampaignAnalyticsService } from './services/campaign-analytics.service';
 import { CampaignProcessor } from './campaign.processor';
 import { SendEmailProcessor } from './send-email.processor';
 import { EmailProvidersController } from './email-providers.controller';
@@ -75,6 +76,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     SuppressionListService,
     AudienceCompilerService,
     CampaignsService,
+    CampaignAnalyticsService,
     CampaignSchedulerService,
     CampaignProcessor,
     SendEmailProcessor
@@ -88,7 +90,8 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     EmailTemplatesService,
     SuppressionListService,
     AudienceCompilerService,
-    CampaignsService
+    CampaignsService,
+    CampaignAnalyticsService
   ],
 })
 export class CampaignsModule {}
