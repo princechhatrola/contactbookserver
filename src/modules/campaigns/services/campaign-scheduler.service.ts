@@ -48,7 +48,7 @@ export class CampaignSchedulerService implements OnApplicationBootstrap, OnAppli
       }
 
       this.logger.log(`Found ${scheduledCampaigns.length} scheduled campaigns ready for processing.`);
-      const client = await this.campaignQueue.client;
+      const client: any = await this.campaignQueue.client;
 
       for (const campaign of scheduledCampaigns) {
         const campaignId = campaign._id.toString();

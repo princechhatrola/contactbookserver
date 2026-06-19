@@ -62,6 +62,10 @@ describe('EmailTemplatesService', () => {
                 }),
               }),
             },
+            findOne: jest.fn().mockResolvedValue({
+              _id: '60c72b2f9b1d8b2a3c8d1055',
+              type: 'smtp',
+            }),
             getDecryptedCredentials: jest.fn().mockReturnValue({
               apiKey: 'mock_test_key',
             }),
@@ -79,6 +83,11 @@ describe('EmailTemplatesService', () => {
                 }),
               }),
             },
+            findOne: jest.fn().mockResolvedValue({
+              _id: '60c72b2f9b1d8b2a3c8d1077',
+              email: 'sales@company.com',
+              name: 'Sales Team',
+            }),
           },
         },
       ],

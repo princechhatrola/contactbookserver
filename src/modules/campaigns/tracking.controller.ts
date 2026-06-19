@@ -2,7 +2,7 @@ import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Request, Response } from 'express';
+import * as express from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { EmailEvent, EmailEventDocument } from './schemas/email-event.schema';
 import { CampaignRecipient, CampaignRecipientDocument } from './schemas/campaign-recipient.schema';
@@ -26,8 +26,8 @@ export class TrackingController {
   async trackOpen(
     @Query('campaignId') campaignId: string,
     @Query('recipientId') recipientId: string,
-    @Req() req: Request,
-    @Res() res: Response,
+    @Req() req: express.Request,
+    @Res() res: express.Response,
   ) {
     try {
       if (Types.ObjectId.isValid(campaignId) && Types.ObjectId.isValid(recipientId)) {
@@ -79,8 +79,8 @@ export class TrackingController {
     @Query('campaignId') campaignId: string,
     @Query('recipientId') recipientId: string,
     @Query('url') originalUrl: string,
-    @Req() req: Request,
-    @Res() res: Response,
+    @Req() req: express.Request,
+    @Res() res: express.Response,
   ) {
     try {
       if (Types.ObjectId.isValid(campaignId) && Types.ObjectId.isValid(recipientId) && originalUrl) {

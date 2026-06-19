@@ -148,22 +148,20 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
     const template = await this.getTemplate(orgId, templateId);
 
     // 1. Fetch provider details
-    const provider = await this.emailProvidersService.emailProviderModel.findOne({
+    const provider = await this.emailProvidersService.findOne(orgId, {
       _id: new Types.ObjectId(dto.emailProviderId),
-      organizationId: new Types.ObjectId(orgId),
       isDeleted: { $ne: true },
-    }).exec();
+    } as any);
 
     if (!provider) {
       throw new NotFoundException(`Email provider with ID ${dto.emailProviderId} not found`);
     }
 
     // 2. Fetch sender profile headers
-    const sender = await this.senderIdentitiesService.senderIdentityModel.findOne({
+    const sender = await this.senderIdentitiesService.findOne(orgId, {
       _id: new Types.ObjectId(dto.senderIdentityId),
-      organizationId: new Types.ObjectId(orgId),
       isDeleted: { $ne: true },
-    }).exec();
+    } as any);
 
     if (!sender) {
       throw new NotFoundException(`Sender identity with ID ${dto.senderIdentityId} not found`);

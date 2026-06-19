@@ -6,7 +6,7 @@ import { Logger, BadRequestException } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { Campaign, CampaignDocument } from './schemas/campaign.schema';
 import { CampaignRecipient, CampaignRecipientDocument } from './schemas/campaign-recipient.schema';
-import { EmailProvider, EmailProviderDocument, ProviderType } from './schemas/email-provider.schema';
+import { EmailProvider, EmailProviderDocument, ProviderType, ProviderStatus } from './schemas/email-provider.schema';
 import { SenderIdentity, SenderIdentityDocument } from './schemas/sender-identity.schema';
 import { Contact, ContactDocument } from '../contacts/schemas/contact.schema';
 import { SuppressionListService } from './services/suppression-list.service';
@@ -61,13 +61,13 @@ export class SendEmailProcessor extends WorkerHost {
 
     // 3. Rate Limiting Check & Provider Rotation
     const client = await this.sendEmailQueue.client;
-    let selectedProvider = await this.providerModel.findOne({
+    let selectedProvider: EmailProviderDocument | null = await this.providerModel.findOne({
       _id: campaign.emailProviderId,
       organizationId: new Types.ObjectId(orgId),
       isDeleted: { $ne: true },
     }).exec();
 
-    let hasBudget = selectedProvider && selectedProvider.status === 'active' && 
+    let hasBudget = selectedProvider && selectedProvider.status === ProviderStatus.ACTIVE && 
                      await this.checkAndIncrementProviderRate(client, selectedProvider);
 
     // If default campaign provider is exhausted, search alternative active providers (rotation check)
@@ -75,7 +75,7 @@ export class SendEmailProcessor extends WorkerHost {
       this.logger.warn(`Default provider ${campaign.emailProviderId} rate limits hit or inactive. Initiating failover rotation.`);
       const activeProviders = await this.providerModel.find({
         organizationId: new Types.ObjectId(orgId),
-        status: 'active',
+        status: ProviderStatus.ACTIVE,
         isDeleted: { $ne: true },
       }).sort({ priority: 1 }).exec();
 

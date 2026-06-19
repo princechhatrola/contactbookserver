@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Contact, ContactDocument } from '../../contacts/schemas/contact.schema';
-import { Lead, LeadDocument } from '../../leads/schemas/lead.schema';
+import { Lead, LeadDocument, LeadStatus } from '../../leads/schemas/lead.schema';
 import { SuppressionListService } from './suppression-list.service';
 import { AudienceSegmentFilterDto } from '../dto/audience-segment-filter.dto';
 
@@ -42,7 +42,7 @@ export class AudienceCompilerService {
     if (dto.leadStatuses && dto.leadStatuses.length > 0) {
       const leads = await this.leadModel.find({
         organizationId: new Types.ObjectId(orgId),
-        status: { $in: dto.leadStatuses },
+        status: { $in: dto.leadStatuses as LeadStatus[] },
       }, { contactId: 1 }).exec();
 
       const contactIds = leads.map(lead => lead.contactId);
