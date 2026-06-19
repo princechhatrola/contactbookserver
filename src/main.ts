@@ -46,11 +46,22 @@ const handler = async (req: any, res: any) => {
     return;
   }
 
-  if (!server) {
-    const app = await bootstrap();
-    server = app.getHttpAdapter().getInstance();
+  try {
+    if (!server) {
+      const app = await bootstrap();
+      server = app.getHttpAdapter().getInstance();
+    }
+    return server(req, res);
+  } catch (error: any) {
+    console.error('NestJS Bootstrap Error:', error);
+    res.setHeader('Content-Type', 'application/json');
+    res.statusCode = 500;
+    res.end(JSON.stringify({
+      message: 'Failed to bootstrap NestJS application',
+      error: error.message || String(error),
+      stack: error.stack,
+    }));
   }
-  return server(req, res);
 };
 export default handler;
 

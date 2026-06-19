@@ -49,8 +49,19 @@ module.exports = async (req, res) => {
     return;
   }
 
-  if (!cachedServer) {
-    cachedServer = await bootstrap();
+  try {
+    if (!cachedServer) {
+      cachedServer = await bootstrap();
+    }
+    return cachedServer(req, res);
+  } catch (error) {
+    console.error('NestJS Bootstrap Error:', error);
+    res.setHeader('Content-Type', 'application/json');
+    res.statusCode = 500;
+    res.end(JSON.stringify({
+      message: 'Failed to bootstrap NestJS application',
+      error: error.message || String(error),
+      stack: error.stack,
+    }));
   }
-  return cachedServer(req, res);
 };
