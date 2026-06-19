@@ -21,6 +21,7 @@ import { ImportsModule } from './modules/imports/imports.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
@@ -90,6 +91,7 @@ const logger = new Logger('AppModule');
     ExportsModule,
     ApiKeysModule,
     DashboardModule,
+    CampaignsModule,
   ],
   controllers: [AppController],
   providers: [
