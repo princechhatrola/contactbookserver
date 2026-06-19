@@ -8,6 +8,7 @@ import { EmailTemplate, EmailTemplateSchema } from './schemas/email-template.sch
 import { SuppressionList, SuppressionListSchema } from './schemas/suppression-list.schema';
 import { Campaign, CampaignSchema } from './schemas/campaign.schema';
 import { CampaignRecipient, CampaignRecipientSchema } from './schemas/campaign-recipient.schema';
+import { EmailEvent, EmailEventSchema } from './schemas/email-event.schema';
 import { Contact, ContactSchema } from '../contacts/schemas/contact.schema';
 import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
 import { EncryptionService } from './services/encryption.service';
@@ -19,6 +20,8 @@ import { SuppressionListService } from './services/suppression-list.service';
 import { AudienceCompilerService } from './services/audience-compiler.service';
 import { CampaignsService } from './services/campaigns.service';
 import { CampaignSchedulerService } from './services/campaign-scheduler.service';
+import { CampaignProcessor } from './campaign.processor';
+import { SendEmailProcessor } from './send-email.processor';
 import { EmailProvidersController } from './email-providers.controller';
 import { SenderIdentitiesController } from './sender-identities.controller';
 import { DomainAuthenticationsController } from './domain-authentications.controller';
@@ -26,6 +29,8 @@ import { EmailTemplatesController } from './email-templates.controller';
 import { SuppressionListController } from './suppression-list.controller';
 import { AudienceController } from './audience.controller';
 import { CampaignsController } from './campaigns.controller';
+import { TrackingController } from './tracking.controller';
+import { WebhooksController } from './webhooks.controller';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 
 @Module({
@@ -38,11 +43,15 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
       { name: SuppressionList.name, schema: SuppressionListSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: CampaignRecipient.name, schema: CampaignRecipientSchema },
+      { name: EmailEvent.name, schema: EmailEventSchema },
       { name: Contact.name, schema: ContactSchema },
       { name: Lead.name, schema: LeadSchema },
     ]),
     BullModule.registerQueue({
       name: 'campaign-queue',
+    }),
+    BullModule.registerQueue({
+      name: 'send-email-queue',
     }),
     AuditLogsModule,
   ],
@@ -53,7 +62,9 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     EmailTemplatesController,
     SuppressionListController,
     AudienceController,
-    CampaignsController
+    CampaignsController,
+    TrackingController,
+    WebhooksController
   ],
   providers: [
     EncryptionService, 
@@ -64,7 +75,9 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     SuppressionListService,
     AudienceCompilerService,
     CampaignsService,
-    CampaignSchedulerService
+    CampaignSchedulerService,
+    CampaignProcessor,
+    SendEmailProcessor
   ],
   exports: [
     MongooseModule, 
@@ -79,4 +92,5 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
   ],
 })
 export class CampaignsModule {}
+
 
