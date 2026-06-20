@@ -135,11 +135,16 @@ export class SendEmailProcessor extends WorkerHost {
         return `<a href="${trackingUrl}"${rest}>`;
       });
 
-      const openPixel = `<img src="${trackingBaseUrl}/tracking/open?campaignId=${campaignId}&recipientId=${recipientId}" width="1" height="1" style="display:none" />`;
+      const trackingUrl = `${trackingBaseUrl}/tracking/open?campaignId=${campaignId}&recipientId=${recipientId}`;
+      const trackingPixel = `<img src="${trackingUrl}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />`;
+      const hiddenDiv = `<div style="color: white; font-size: 1px; display:none; line-height: 1px; max-height: 0; overflow: hidden;">${recipientId}</div>`;
+      const trackingLink = `<a href="${trackingUrl}" style="display:none; text-decoration:none; color:transparent;">&nbsp;</a>`;
+
+      const trackingPayload = `\n${trackingPixel}\n${hiddenDiv}\n${trackingLink}\n`;
       if (compiledHtml.includes('</body>')) {
-        compiledHtml = compiledHtml.replace('</body>', `${openPixel}</body>`);
+        compiledHtml = compiledHtml.replace('</body>', `${trackingPayload}</body>`);
       } else {
-        compiledHtml += openPixel;
+        compiledHtml += trackingPayload;
       }
 
       // 7. Dispatch Email
