@@ -67,8 +67,8 @@ export class CampaignProcessor extends WorkerHost {
       }
 
       // 4. Distinguish between new recipients and existing pending ones
-      const toInsert = [];
-      const toQueue = [];
+      const toInsert: any[] = [];
+      const toQueue: CampaignRecipientDocument[] = [];
 
       for (const contact of contacts) {
         const existing = existingMap.get(contact._id.toString());
@@ -85,7 +85,7 @@ export class CampaignProcessor extends WorkerHost {
       this.logger.log(`New recipients to insert: ${toInsert.length}. Existing pending to queue: ${toQueue.length}.`);
 
       // 5. Bulk insert newly matching recipients
-      let insertedRecipients = [];
+      let insertedRecipients: CampaignRecipientDocument[] = [];
       if (toInsert.length > 0) {
         const recipientDocs = toInsert.map(contact => ({
           organizationId: campaign.organizationId,
