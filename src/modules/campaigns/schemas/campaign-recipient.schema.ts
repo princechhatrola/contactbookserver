@@ -19,7 +19,7 @@ export class CampaignRecipient {
 
   @Prop({
     type: String,
-    enum: ['pending', 'sent', 'failed', 'bounced', 'complaint', 'replied', 'unsubscribed'],
+    enum: ['pending', 'sent', 'opened', 'clicked', 'failed', 'bounced', 'complaint', 'replied', 'unsubscribed'],
     default: 'pending',
     index: true,
   })
