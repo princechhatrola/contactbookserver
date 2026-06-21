@@ -39,135 +39,178 @@ export class SendEmailProcessor extends WorkerHost {
     const { recipientId, campaignId, orgId, contactId, email } = job.data;
     this.logger.log(`Processing email send job to ${email} for campaign ${campaignId}`);
 
-    // 1. Check Campaign Lifecycle Status
-    const campaign = await this.campaignModel.findById(campaignId).exec();
-    if (!campaign || campaign.status === 'paused' || campaign.status === 'cancelled' || campaign.isDeleted) {
-      this.logger.warn(`Campaign ${campaignId} is paused, cancelled, or deleted. Aborting send job.`);
-      return;
-    }
-
-    // 2. Check Suppression List
-    const isSuppressed = await this.suppressionService.isSuppressed(orgId, email);
-    if (isSuppressed) {
-      this.logger.warn(`Recipient email ${email} is suppressed. Skipping send.`);
-      await this.recipientModel.findByIdAndUpdate(recipientId, {
-        status: 'failed',
-        error: 'Email address is in the suppression list.',
-      }).exec();
-      await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
-      await this.checkCampaignCompletion(campaignId);
-      return;
-    }
-
-    // 3. Rate Limiting Check & Provider Rotation
     const client = await this.sendEmailQueue.client;
-    let selectedProvider: EmailProviderDocument | null = await this.providerModel.findOne({
-      _id: campaign.emailProviderId,
-      organizationId: new Types.ObjectId(orgId),
-      isDeleted: { $ne: true },
-    }).exec();
-
-    let hasBudget = selectedProvider && selectedProvider.status === ProviderStatus.ACTIVE && 
-                     await this.checkAndIncrementProviderRate(client, selectedProvider);
-
-    // If default campaign provider is exhausted, search alternative active providers (rotation check)
-    if (!hasBudget) {
-      this.logger.warn(`Default provider ${campaign.emailProviderId} rate limits hit or inactive. Initiating failover rotation.`);
-      const activeProviders = await this.providerModel.find({
-        organizationId: new Types.ObjectId(orgId),
-        status: ProviderStatus.ACTIVE,
-        isDeleted: { $ne: true },
-      }).sort({ priority: 1 }).exec();
-
-      selectedProvider = null;
-      for (const prov of activeProviders) {
-        const allowed = await this.checkAndIncrementProviderRate(client, prov);
-        if (allowed) {
-          selectedProvider = prov;
-          break;
-        }
-      }
-    }
-
-    if (!selectedProvider) {
-      // Throttle: Re-queue job by throwing error (which triggers BullMQ retry backoff)
-      throw new Error(`Sending rate limits exceeded for all active email providers in organization ${orgId}. Backing off...`);
-    }
-
-    // Load Sender Identity
-    const sender = await this.recipientModel.db.model(SenderIdentity.name).findOne({
-      _id: campaign.senderIdentityId,
-      organizationId: new Types.ObjectId(orgId),
-      isDeleted: { $ne: true },
-    }).exec();
-
-    if (!sender) {
-      this.logger.error(`Sender identity ${campaign.senderIdentityId} not found.`);
-      await this.recipientModel.findByIdAndUpdate(recipientId, {
-        status: 'failed',
-        error: 'Sender identity not found.',
-      }).exec();
-      await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
-      await this.checkCampaignCompletion(campaignId);
+    const lockKey = `lock:recipient:${recipientId}`;
+    
+    // Acquire a 5-day lock to prevent concurrent workers processing the same recipient
+    const acquired = await client.set(lockKey, '1', 'PX', 432000000, 'NX');
+    if (acquired !== 'OK') {
+      this.logger.warn(`Recipient ${recipientId} is currently being processed by another worker. Skipping.`);
       return;
     }
+
+    const releaseLock = async () => {
+      try {
+        await client.del(lockKey);
+      } catch (err: any) {
+        this.logger.error(`Failed to release lock ${lockKey}: ${err.message}`);
+      }
+    };
 
     try {
-      // 4. Fetch Contact Details to compile variables
-      const contact = await this.contactModel.findById(contactId).exec();
-      if (!contact) {
-        throw new Error(`Contact ID ${contactId} not found in CRM database.`);
+      // 1. Fetch individual recipient log to check status
+      const recipient = await this.recipientModel.findById(recipientId).exec();
+      if (!recipient) {
+        this.logger.warn(`Recipient log ${recipientId} not found in DB. Aborting send job.`);
+        await releaseLock();
+        return;
       }
 
-      // 5. Retrieve template & render placeholders
-      const template = await this.templatesService.getTemplate(orgId, campaign.emailTemplateId.toString());
-      const compiledSubject = this.templatesService.compile(campaign.subject, contact);
-      let compiledHtml = this.templatesService.compile(template.htmlContent, contact);
+      if (recipient.status !== 'pending') {
+        this.logger.warn(`Recipient ${recipientId} already has status "${recipient.status}" (not "pending"). Aborting to prevent duplicate email.`);
+        await releaseLock();
+        return;
+      }
 
-      // 6. Rewrite Links & Open Pixel Tracking
-      const trackingBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+      // 2. Check Campaign Lifecycle Status
+      const campaign = await this.campaignModel.findById(campaignId).exec();
+      if (!campaign || campaign.status === 'paused' || campaign.status === 'cancelled' || campaign.isDeleted) {
+        this.logger.warn(`Campaign ${campaignId} is paused, cancelled, or deleted. Aborting send job.`);
+        await releaseLock();
+        return;
+      }
 
-      compiledHtml = compiledHtml.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"([^>]*)>/gi, (match, originalUrl, rest) => {
-        if (!originalUrl || originalUrl.startsWith('#') || originalUrl.startsWith('mailto:') || originalUrl.startsWith('tel:')) {
-          return match;
+      // 3. Check Suppression List
+      const isSuppressed = await this.suppressionService.isSuppressed(orgId, email);
+      if (isSuppressed) {
+        this.logger.warn(`Recipient email ${email} is suppressed. Skipping send.`);
+        await this.recipientModel.findByIdAndUpdate(recipientId, {
+          status: 'failed',
+          error: 'Email address is in the suppression list.',
+        }).exec();
+        await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
+        await this.checkCampaignCompletion(campaignId);
+        await releaseLock();
+        return;
+      }
+
+      // 4. Rate Limiting Check & Provider Rotation
+      let selectedProvider: EmailProviderDocument | null = await this.providerModel.findOne({
+        _id: campaign.emailProviderId,
+        organizationId: new Types.ObjectId(orgId),
+        isDeleted: { $ne: true },
+      }).exec();
+
+      let hasBudget = selectedProvider && selectedProvider.status === ProviderStatus.ACTIVE && 
+                       await this.checkAndIncrementProviderRate(client, selectedProvider);
+
+      // If default campaign provider is exhausted, search alternative active providers (rotation check)
+      if (!hasBudget) {
+        this.logger.warn(`Default provider ${campaign.emailProviderId} rate limits hit or inactive. Initiating failover rotation.`);
+        const activeProviders = await this.providerModel.find({
+          organizationId: new Types.ObjectId(orgId),
+          status: ProviderStatus.ACTIVE,
+          isDeleted: { $ne: true },
+        }).sort({ priority: 1 }).exec();
+
+        selectedProvider = null;
+        for (const prov of activeProviders) {
+          const allowed = await this.checkAndIncrementProviderRate(client, prov);
+          if (allowed) {
+            selectedProvider = prov;
+            break;
+          }
         }
-        const trackingUrl = `${trackingBaseUrl}/tracking/click?campaignId=${campaignId}&recipientId=${recipientId}&url=${encodeURIComponent(originalUrl)}`;
-        return `<a href="${trackingUrl}"${rest}>`;
-      });
-
-      const trackingUrl = `${trackingBaseUrl}/tracking/open?campaignId=${campaignId}&recipientId=${recipientId}`;
-      const trackingPixel = `<img src="${trackingUrl}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />`;
-      const hiddenDiv = `<div style="color: white; font-size: 1px; display:none; line-height: 1px; max-height: 0; overflow: hidden;">${recipientId}</div>`;
-      const trackingLink = `<a href="${trackingUrl}" style="display:none; text-decoration:none; color:transparent;">&nbsp;</a>`;
-
-      const trackingPayload = `\n${trackingPixel}\n${hiddenDiv}\n${trackingLink}\n`;
-      if (compiledHtml.includes('</body>')) {
-        compiledHtml = compiledHtml.replace('</body>', `${trackingPayload}</body>`);
-      } else {
-        compiledHtml += trackingPayload;
       }
 
-      // 7. Dispatch Email
-      await this.dispatchMail(selectedProvider, sender, email, compiledSubject, compiledHtml, campaignId, recipientId);
+      if (!selectedProvider) {
+        // Release lock before throwing error to allow BullMQ retries
+        await releaseLock();
+        // Throttle: Re-queue job by throwing error (which triggers BullMQ retry backoff)
+        throw new Error(`Sending rate limits exceeded for all active email providers in organization ${orgId}. Backing off...`);
+      }
 
-      // 8. Update stats as success
-      await this.recipientModel.findByIdAndUpdate(recipientId, {
-        status: 'sent',
-        sentAt: new Date(),
+      // Load Sender Identity
+      const sender = await this.recipientModel.db.model(SenderIdentity.name).findOne({
+        _id: campaign.senderIdentityId,
+        organizationId: new Types.ObjectId(orgId),
+        isDeleted: { $ne: true },
       }).exec();
 
-      await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { sentRecipients: 1 } }).exec();
+      if (!sender) {
+        this.logger.error(`Sender identity ${campaign.senderIdentityId} not found.`);
+        await this.recipientModel.findByIdAndUpdate(recipientId, {
+          status: 'failed',
+          error: 'Sender identity not found.',
+        }).exec();
+        await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
+        await this.checkCampaignCompletion(campaignId);
+        await releaseLock();
+        return;
+      }
 
-    } catch (err: any) {
-      this.logger.error(`Failed to dispatch email to ${email}: ${err.message}`);
-      await this.recipientModel.findByIdAndUpdate(recipientId, {
-        status: 'failed',
-        error: err.message || 'Unknown send error',
-      }).exec();
+      try {
+        // 5. Fetch Contact Details to compile variables
+        const contact = await this.contactModel.findById(contactId).exec();
+        if (!contact) {
+          throw new Error(`Contact ID ${contactId} not found in CRM database.`);
+        }
 
-      await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
-    } finally {
-      await this.checkCampaignCompletion(campaignId);
+        // 6. Retrieve template & render placeholders
+        const template = await this.templatesService.getTemplate(orgId, campaign.emailTemplateId.toString());
+        const compiledSubject = this.templatesService.compile(campaign.subject, contact);
+        let compiledHtml = this.templatesService.compile(template.htmlContent, contact);
+
+        // 7. Rewrite Links & Open Pixel Tracking
+        const trackingBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+
+        compiledHtml = compiledHtml.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"([^>]*)>/gi, (match, originalUrl, rest) => {
+          if (!originalUrl || originalUrl.startsWith('#') || originalUrl.startsWith('mailto:') || originalUrl.startsWith('tel:')) {
+            return match;
+          }
+          const trackingUrl = `${trackingBaseUrl}/tracking/click?campaignId=${campaignId}&recipientId=${recipientId}&url=${encodeURIComponent(originalUrl)}`;
+          return `<a href="${trackingUrl}"${rest}>`;
+        });
+
+        const trackingUrl = `${trackingBaseUrl}/tracking/open?campaignId=${campaignId}&recipientId=${recipientId}`;
+        const trackingPixel = `<img src="${trackingUrl}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />`;
+        const hiddenDiv = `<div style="color: white; font-size: 1px; display:none; line-height: 1px; max-height: 0; overflow: hidden;">${recipientId}</div>`;
+        const trackingLink = `<a href="${trackingUrl}" style="display:none; text-decoration:none; color:transparent;">&nbsp;</a>`;
+
+        const trackingPayload = `\n${trackingPixel}\n${hiddenDiv}\n${trackingLink}\n`;
+        if (compiledHtml.includes('</body>')) {
+          compiledHtml = compiledHtml.replace('</body>', `${trackingPayload}</body>`);
+        } else {
+          compiledHtml += trackingPayload;
+        }
+
+        // 8. Dispatch Email
+        await this.dispatchMail(selectedProvider, sender, email, compiledSubject, compiledHtml, campaignId, recipientId);
+
+        // 9. Update stats as success
+        await this.recipientModel.findByIdAndUpdate(recipientId, {
+          status: 'sent',
+          sentAt: new Date(),
+        }).exec();
+
+        await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { sentRecipients: 1 } }).exec();
+
+      } catch (err: any) {
+        this.logger.error(`Failed to dispatch email to ${email}: ${err.message}`);
+        await this.recipientModel.findByIdAndUpdate(recipientId, {
+          status: 'failed',
+          error: err.message || 'Unknown send error',
+        }).exec();
+
+        await this.campaignModel.findByIdAndUpdate(campaignId, { $inc: { failedRecipients: 1 } }).exec();
+      } finally {
+        await this.checkCampaignCompletion(campaignId);
+        await releaseLock();
+      }
+
+    } catch (outerErr) {
+      await releaseLock();
+      throw outerErr;
     }
   }
 

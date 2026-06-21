@@ -43,6 +43,8 @@ describe('Campaigns Sending, Tracking & Webhooks Suite', () => {
     // Redis Mock
     mockRedisClient = {
       get: jest.fn(),
+      set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
       incr: jest.fn(),
       expire: jest.fn(),
     };
@@ -71,7 +73,16 @@ describe('Campaigns Sending, Tracking & Webhooks Suite', () => {
           return null;
         }),
       },
-      findById: jest.fn(),
+      findById: jest.fn().mockImplementation((id: string) => ({
+        exec: jest.fn().mockResolvedValue({
+          _id: new Types.ObjectId(id),
+          organizationId: new Types.ObjectId('60c72b2f9b1d8b2a3c8d3333'),
+          campaignId: new Types.ObjectId('60c72b2f9b1d8b2a3c8d2222'),
+          contactId: new Types.ObjectId('60c72b2f9b1d8b2a3c8d4444'),
+          email: 'test@recipient.com',
+          status: 'pending',
+        }),
+      })),
       findByIdAndUpdate: jest.fn(),
       findOne: jest.fn(),
       countDocuments: jest.fn(),
@@ -189,6 +200,36 @@ describe('Campaigns Sending, Tracking & Webhooks Suite', () => {
 
       expect(mockCampaignModel.findById).toHaveBeenCalledWith(jobMock.data.campaignId);
       expect(mockRecipientModel.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('should abort dispatch if recipient status is not pending', async () => {
+      const mockRecipient = {
+        _id: new Types.ObjectId(jobMock.data.recipientId),
+        status: 'sent',
+      };
+      mockRecipientModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockRecipient),
+      });
+
+      await processor.process(jobMock);
+
+      expect(mockRecipientModel.findById).toHaveBeenCalledWith(jobMock.data.recipientId);
+      expect(mockCampaignModel.findById).not.toHaveBeenCalled();
+    });
+
+    it('should abort dispatch if Redis lock is already held by another worker', async () => {
+      mockRedisClient.set.mockResolvedValue('BUSY'); // Mock lock acquisition failure
+
+      await processor.process(jobMock);
+
+      expect(mockRedisClient.set).toHaveBeenCalledWith(
+        `lock:recipient:${jobMock.data.recipientId}`,
+        '1',
+        'PX',
+        432000000,
+        'NX',
+      );
+      expect(mockRecipientModel.findById).not.toHaveBeenCalled();
     });
 
     it('should skip send and fail recipient if recipient email is suppressed', async () => {
