@@ -39,7 +39,7 @@ export class SendEmailProcessor extends WorkerHost {
     const { recipientId, campaignId, orgId, contactId, email } = job.data;
     this.logger.log(`Processing email send job to ${email} for campaign ${campaignId}`);
 
-    const client = await this.sendEmailQueue.client;
+    const client: any = await this.sendEmailQueue.client;
     const lockKey = `lock:recipient:${recipientId}`;
     
     // Acquire a 5-day lock to prevent concurrent workers processing the same recipient
