@@ -220,4 +220,38 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
     this.logger.log(`Campaign ${id} cancelled.`);
     return campaign;
   }
+
+  async getCampaignRecipients(
+    orgId: string,
+    campaignId: string,
+    page = 1,
+    limit = 10,
+  ): Promise<{ data: CampaignRecipientDocument[]; total: number; page: number; limit: number; pages: number }> {
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.max(1, Math.min(100, Number(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const filter = {
+      organizationId: new Types.ObjectId(orgId),
+      campaignId: new Types.ObjectId(campaignId),
+    };
+
+    const [data, total] = await Promise.all([
+      this.recipientModel.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('contactId', 'firstName lastName')
+        .exec(),
+      this.recipientModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      pages: Math.ceil(total / limitNum),
+    };
+  }
 }

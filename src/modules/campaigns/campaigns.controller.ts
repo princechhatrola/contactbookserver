@@ -128,4 +128,26 @@ export class CampaignsController {
   ) {
     return this.campaignsService.cancelCampaign(orgId, id);
   }
+
+  @Get(':id/recipients')
+  @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+  @ApiOperation({ summary: 'Get paginated list of recipients for a campaign' })
+  async getCampaignRecipients(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.campaignsService.getCampaignRecipients(orgId, campaignId, page, limit);
+  }
+
+  @Get(':id/events/summary')
+  @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+  @ApiOperation({ summary: 'Get campaign events summary for analytics chart' })
+  async getCampaignEventsSummary(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+  ) {
+    return this.analyticsService.getCampaignEventsSummary(orgId, campaignId);
+  }
 }

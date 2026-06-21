@@ -478,4 +478,48 @@ export class CampaignAnalyticsService {
       geographicDistribution
     };
   }
+
+  async getCampaignEventsSummary(orgId: string, campaignId: string): Promise<{ data: any[] }> {
+    const eventMatch = {
+      organizationId: new Types.ObjectId(orgId),
+      campaignId: new Types.ObjectId(campaignId),
+    };
+
+    const dailyStats = await this.eventModel.aggregate([
+      { $match: eventMatch },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+          },
+          opens: {
+            $sum: { $cond: [{ $eq: ['$eventType', 'open'] }, 1, 0] }
+          },
+          clicks: {
+            $sum: { $cond: [{ $eq: ['$eventType', 'click'] }, 1, 0] }
+          }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const data = dailyStats.map(stat => {
+      const parts = stat._id.split('-');
+      let dateLabel = stat._id;
+      if (parts.length === 3) {
+        const year = Number(parts[0]);
+        const month = Number(parts[1]) - 1;
+        const day = Number(parts[2]);
+        const dateObj = new Date(year, month, day);
+        dateLabel = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      }
+      return {
+        date: dateLabel,
+        opens: stat.opens || 0,
+        clicks: stat.clicks || 0,
+      };
+    });
+
+    return { data };
+  }
 }
