@@ -10,6 +10,7 @@ import { ImportHistory, ImportHistoryDocument, ImportStatus } from './schemas/im
 import { Contact, ContactDocument } from '../contacts/schemas/contact.schema';
 import { ContactsService } from '../contacts/contacts.service';
 import { AuditLogEmitter } from '../audit-logs/audit-log-emitter';
+import { StorageService } from '../storage/storage.service';
 
 @Processor('import-queue')
 export class ImportProcessor extends WorkerHost {
@@ -20,6 +21,7 @@ export class ImportProcessor extends WorkerHost {
     private readonly contactModel: Model<ContactDocument>,
     private readonly contactsService: ContactsService,
     private readonly auditLogEmitter: AuditLogEmitter,
+    private readonly storageService: StorageService,
   ) {
     super();
   }
@@ -38,16 +40,14 @@ export class ImportProcessor extends WorkerHost {
     importHistory.status = ImportStatus.PROCESSING;
     await importHistory.save();
 
-    // Verify file exists
-    const baseUploadDir = process.env.VERCEL === '1'
-      ? path.join('/tmp', 'uploads', 'imports')
-      : path.join(process.cwd(), 'uploads', 'imports');
-    const filePath = path.join(baseUploadDir, fileId);
-    if (!fs.existsSync(filePath)) {
+    // Verify file exists in storage
+    const s3Key = `imports/${fileId}`;
+    const fileExists = await this.storageService.exists(s3Key);
+    if (!fileExists) {
       importHistory.status = ImportStatus.FAILED;
       importHistory.rowErrors.push({
         row: 0,
-        error: 'Uploaded file could not be found on disk.',
+        error: 'Uploaded file could not be found in storage.',
       });
       await importHistory.save();
       
@@ -55,7 +55,33 @@ export class ImportProcessor extends WorkerHost {
         orgId,
         userId,
         action: 'import.failed',
-        description: `Import job ${importHistory.fileName} failed: File not found`,
+        description: `Import job ${importHistory.fileName} failed: File not found in storage`,
+        metadata: { jobId },
+      });
+      return;
+    }
+
+    const baseUploadDir = process.env.VERCEL === '1'
+      ? path.join('/tmp', 'uploads', 'imports')
+      : path.join(process.cwd(), 'uploads', 'imports');
+    const filePath = path.join(baseUploadDir, fileId);
+
+    // Download file from S3/Local Storage to temporary local path
+    try {
+      await this.storageService.downloadFile(s3Key, filePath);
+    } catch (downloadErr: any) {
+      importHistory.status = ImportStatus.FAILED;
+      importHistory.rowErrors.push({
+        row: 0,
+        error: `Failed to download file from storage: ${downloadErr.message}`,
+      });
+      await importHistory.save();
+
+      this.auditLogEmitter.emit('audit.log', {
+        orgId,
+        userId,
+        action: 'import.failed',
+        description: `Import job ${importHistory.fileName} failed: Storage download failed`,
         metadata: { jobId },
       });
       return;

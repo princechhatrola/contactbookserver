@@ -11,6 +11,7 @@ import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
 import { Task, TaskDocument } from '../tasks/schemas/task.schema';
 import { Group, GroupDocument } from '../groups/schemas/group.schema';
 import { AuditLogEmitter } from '../audit-logs/audit-log-emitter';
+import { StorageService } from '../storage/storage.service';
 
 @Processor('export-queue')
 export class ExportProcessor extends WorkerHost {
@@ -26,6 +27,7 @@ export class ExportProcessor extends WorkerHost {
     @InjectModel(Group.name)
     private readonly groupModel: Model<GroupDocument>,
     private readonly auditLogEmitter: AuditLogEmitter,
+    private readonly storageService: StorageService,
   ) {
     super();
   }
@@ -160,12 +162,22 @@ export class ExportProcessor extends WorkerHost {
         xlsx.writeFile(workbook, filePath);
       }
 
-      // 3. Update job in DB
+      // 3. Upload to S3/Local Storage and Update job in DB
+      const s3Key = `exports/${orgId}/${fileName}`;
+      await this.storageService.uploadFile(filePath, s3Key);
+
       exportJob.status = ExportStatus.COMPLETED;
       exportJob.fileName = fileName;
-      exportJob.filePath = filePath;
+      exportJob.filePath = s3Key;
       exportJob.totalRecords = records.length;
       await exportJob.save();
+
+      // Cleanup local temp file
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (_) {}
+      }
 
       // Emit completed audit log
       this.auditLogEmitter.emit('audit.log', {

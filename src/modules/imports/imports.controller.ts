@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ImportsService } from './imports.service';
+import { StorageService } from '../storage/storage.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { getFilePreview } from './utils/preview.util';
 
@@ -20,7 +21,10 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 @ApiBearerAuth()
 @Controller('imports')
 export class ImportsController {
-  constructor(private readonly importsService: ImportsService) {}
+  constructor(
+    private readonly importsService: ImportsService,
+    private readonly storageService: StorageService,
+  ) {}
 
   @Post('upload')
   @ApiOperation({ summary: 'Upload a CSV or XLSX contacts file for mapping preview' })
@@ -64,6 +68,16 @@ export class ImportsController {
 
     try {
       const { headers, previewRows } = await getFilePreview(file.path, file.originalname);
+      
+      // Upload file to S3/Local Storage
+      const s3Key = `imports/${file.filename}`;
+      await this.storageService.uploadFile(file.path, s3Key);
+
+      // Cleanup local temp file
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+
       return {
         fileId: file.filename,
         fileName: file.originalname,
@@ -71,11 +85,11 @@ export class ImportsController {
         previewRows,
       };
     } catch (err: any) {
-      // Cleanup file on error
+      // Cleanup local temp file on error
       if (fs.existsSync(file.path)) {
         fs.unlinkSync(file.path);
       }
-      throw new BadRequestException(`Failed to parse file: ${err.message}`);
+      throw new BadRequestException(`Failed to parse and store file: ${err.message}`);
     }
   }
 
@@ -96,9 +110,10 @@ export class ImportsController {
       throw new BadRequestException('Missing required body fields');
     }
 
-    // Verify file exists
-    const filePath = path.join(UPLOAD_DIR, dto.fileId);
-    if (!fs.existsSync(filePath)) {
+    // Verify file exists in S3/Local Storage
+    const s3Key = `imports/${dto.fileId}`;
+    const fileExists = await this.storageService.exists(s3Key);
+    if (!fileExists) {
       throw new BadRequestException('Uploaded file does not exist or has expired');
     }
 
