@@ -16,6 +16,7 @@ import { EmailProvidersService } from './email-providers.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import { SuppressionReason } from '../schemas/suppression-list.schema';
 import { Response, Request } from 'express';
+import { StorageService } from '../../storage/storage.service';
 
 describe('Campaigns Sending, Tracking & Webhooks Suite', () => {
   let processor: SendEmailProcessor;
@@ -162,6 +163,15 @@ describe('Campaigns Sending, Tracking & Webhooks Suite', () => {
         {
           provide: getQueueToken('send-email-queue'),
           useValue: mockQueue,
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            uploadFile: jest.fn(),
+            deleteFile: jest.fn(),
+            exists: jest.fn(),
+            getObjectStream: jest.fn(),
+          },
         },
       ],
     }).compile();

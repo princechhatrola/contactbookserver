@@ -12,6 +12,7 @@ import { Contact, ContactDocument } from '../contacts/schemas/contact.schema';
 import { SuppressionListService } from './services/suppression-list.service';
 import { EmailTemplatesService } from './services/email-templates.service';
 import { EmailProvidersService } from './services/email-providers.service';
+import { StorageService } from '../storage/storage.service';
 
 @Processor('send-email-queue')
 export class SendEmailProcessor extends WorkerHost {
@@ -31,6 +32,7 @@ export class SendEmailProcessor extends WorkerHost {
     private readonly emailProvidersService: EmailProvidersService,
     @InjectQueue('send-email-queue')
     private readonly sendEmailQueue: Queue,
+    private readonly storageService: StorageService,
   ) {
     super();
   }
@@ -184,8 +186,40 @@ export class SendEmailProcessor extends WorkerHost {
           compiledHtml += trackingPayload;
         }
 
+        // 7.5 Load campaign attachments as Buffers
+        const emailAttachments: any[] = [];
+        if (campaign.attachments && campaign.attachments.length > 0) {
+          for (const att of campaign.attachments) {
+            try {
+              const stream = await this.storageService.getObjectStream(att.path);
+              const chunks: Buffer[] = [];
+              for await (const chunk of stream) {
+                chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk));
+              }
+              const buffer = Buffer.concat(chunks);
+              emailAttachments.push({
+                filename: att.filename,
+                content: buffer,
+                contentType: att.mimetype,
+              });
+            } catch (err: any) {
+              this.logger.error(`Failed to load attachment ${att.filename} from storage: ${err.message}`);
+              throw new Error(`Attachment load error for file ${att.filename}: ${err.message}`);
+            }
+          }
+        }
+
         // 8. Dispatch Email
-        await this.dispatchMail(selectedProvider, sender, email, compiledSubject, compiledHtml, campaignId, recipientId);
+        await this.dispatchMail(
+          selectedProvider,
+          sender,
+          email,
+          compiledSubject,
+          compiledHtml,
+          campaignId,
+          recipientId,
+          emailAttachments,
+        );
 
         // 9. Update stats as success
         await this.recipientModel.findByIdAndUpdate(recipientId, {
@@ -254,6 +288,7 @@ export class SendEmailProcessor extends WorkerHost {
     html: string,
     campaignId: string,
     recipientId: string,
+    attachments: any[],
   ): Promise<void> {
     const credentials = this.emailProvidersService.getDecryptedCredentials(provider);
 
@@ -281,6 +316,11 @@ export class SendEmailProcessor extends WorkerHost {
           to,
           subject,
           html,
+          attachments: attachments.map(att => ({
+            filename: att.filename,
+            content: att.content,
+            contentType: att.contentType,
+          })),
           headers: {
             'X-Campaign-Id': campaignId,
             'X-Recipient-Id': recipientId,
@@ -290,6 +330,12 @@ export class SendEmailProcessor extends WorkerHost {
       }
 
       case ProviderType.SENDGRID: {
+        const sendgridAttachments = attachments.map(att => ({
+          content: att.content.toString('base64'),
+          filename: att.filename,
+          type: att.contentType,
+          disposition: 'attachment',
+        }));
         const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method: 'POST',
           headers: {
@@ -301,6 +347,7 @@ export class SendEmailProcessor extends WorkerHost {
             from: { email: sender.email, name: sender.name },
             subject,
             content: [{ type: 'text/html', value: html }],
+            attachments: sendgridAttachments.length > 0 ? sendgridAttachments : undefined,
             custom_args: { campaignId, recipientId },
           }),
         });
@@ -312,6 +359,10 @@ export class SendEmailProcessor extends WorkerHost {
       }
 
       case ProviderType.RESEND: {
+        const resendAttachments = attachments.map(att => ({
+          content: att.content.toString('base64'),
+          filename: att.filename,
+        }));
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -323,6 +374,7 @@ export class SendEmailProcessor extends WorkerHost {
             to,
             subject,
             html,
+            attachments: resendAttachments.length > 0 ? resendAttachments : undefined,
             headers: {
               'X-Campaign-Id': campaignId,
               'X-Recipient-Id': recipientId,
@@ -340,7 +392,7 @@ export class SendEmailProcessor extends WorkerHost {
         const domain = credentials.domain || 'sandbox';
         const mgHost = credentials.host || 'api.mailgun.net';
         const auth = Buffer.from(`api:${credentials.apiKey}`).toString('base64');
-        const form = new URLSearchParams();
+        const form = new FormData();
         form.append('from', `"${sender.name}" <${sender.email}>`);
         form.append('to', to);
         form.append('subject', subject);
@@ -348,13 +400,17 @@ export class SendEmailProcessor extends WorkerHost {
         form.append('v:campaignId', campaignId);
         form.append('v:recipientId', recipientId);
 
+        for (const att of attachments) {
+          const blob = new Blob([att.content], { type: att.contentType });
+          form.append('attachment', blob, att.filename);
+        }
+
         const res = await fetch(`https://${mgHost}/v3/${domain}/messages`, {
           method: 'POST',
           headers: {
             Authorization: `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: form.toString(),
+          body: form,
         });
         if (res.status >= 400) {
           const text = await res.text();

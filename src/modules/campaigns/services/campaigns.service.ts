@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, QueryFilter } from 'mongoose';
+import * as fs from 'fs';
 import { BaseTenantRepository } from '../../../common/repositories/base-tenant.repository';
 import { Campaign, CampaignDocument } from '../schemas/campaign.schema';
 import { CampaignRecipient, CampaignRecipientDocument } from '../schemas/campaign-recipient.schema';
@@ -8,6 +9,7 @@ import { CreateCampaignDto } from '../dto/create-campaign.dto';
 import { UpdateCampaignDto } from '../dto/update-campaign.dto';
 import { AudienceCompilerService } from './audience-compiler.service';
 import { AuditLogEmitter } from '../../audit-logs/audit-log-emitter';
+import { StorageService } from '../../storage/storage.service';
 
 @Injectable()
 export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
@@ -20,6 +22,7 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
     private readonly recipientModel: Model<CampaignRecipientDocument>,
     private readonly audienceCompilerService: AudienceCompilerService,
     private readonly auditLogEmitter: AuditLogEmitter,
+    private readonly storageService: StorageService,
   ) {
     super(campaignModel);
   }
@@ -253,5 +256,97 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
       limit: limitNum,
       pages: Math.ceil(total / limitNum),
     };
+  }
+
+  async addAttachment(
+    orgId: string,
+    campaignId: string,
+    file: Express.Multer.File,
+  ): Promise<CampaignDocument> {
+    const campaign = await this.getCampaign(orgId, campaignId);
+
+    if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+      throw new BadRequestException(`Cannot add attachments to campaign in "${campaign.status}" status.`);
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Attachment size exceeds the maximum limit of 5MB.');
+    }
+
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const sanitizedFilename = file.originalname.replace(/\s+/g, '_');
+    const s3Key = `campaigns/${campaignId}/attachments/${uniqueSuffix}-${sanitizedFilename}`;
+
+    try {
+      await this.storageService.uploadFile(file.path, s3Key);
+
+      const updated = await this.campaignModel.findByIdAndUpdate(
+        campaignId,
+        {
+          $push: {
+            attachments: {
+              filename: file.originalname,
+              path: s3Key,
+              mimetype: file.mimetype,
+              size: file.size,
+            },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`Campaign with ID ${campaignId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to upload attachment: ${err.message}`);
+    } finally {
+      if (fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (_) {}
+      }
+    }
+  }
+
+  async removeAttachment(
+    orgId: string,
+    campaignId: string,
+    filename: string,
+  ): Promise<CampaignDocument> {
+    const campaign = await this.getCampaign(orgId, campaignId);
+
+    if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+      throw new BadRequestException(`Cannot remove attachments from campaign in "${campaign.status}" status.`);
+    }
+
+    const attachment = campaign.attachments?.find((att) => att.filename === filename);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment "${filename}" not found in this campaign.`);
+    }
+
+    try {
+      await this.storageService.deleteFile(attachment.path);
+
+      const updated = await this.campaignModel.findByIdAndUpdate(
+        campaignId,
+        {
+          $pull: {
+            attachments: { filename },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`Campaign with ID ${campaignId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to remove attachment: ${err.message}`);
+    }
   }
 }

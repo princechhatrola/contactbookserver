@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CampaignsService } from './services/campaigns.service';
 import { CampaignAnalyticsService } from './services/campaign-analytics.service';
@@ -7,6 +7,18 @@ import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Ensure temporary upload directory exists
+const ATTACHMENT_UPLOAD_DIR = process.env.VERCEL === '1'
+  ? path.join('/tmp', 'uploads', 'campaign-attachments')
+  : path.join(process.cwd(), 'uploads', 'campaign-attachments');
+if (!fs.existsSync(ATTACHMENT_UPLOAD_DIR)) {
+  fs.mkdirSync(ATTACHMENT_UPLOAD_DIR, { recursive: true });
+}
 
 @ApiTags('Campaigns')
 @ApiBearerAuth()
@@ -149,5 +161,42 @@ export class CampaignsController {
     @Param('id') campaignId: string,
   ) {
     return this.analyticsService.getCampaignEventsSummary(orgId, campaignId);
+  }
+
+  @Post(':id/attachments')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: ATTACHMENT_UPLOAD_DIR,
+        filename: (req, file, cb) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, uniqueSuffix + path.extname(file.originalname));
+        },
+      }),
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB Limit
+      },
+    }),
+  )
+  @ApiOperation({ summary: 'Upload a campaign attachment (image, file, video)' })
+  async addAttachment(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    return this.campaignsService.addAttachment(orgId, campaignId, file);
+  }
+
+  @Delete(':id/attachments/:filename')
+  @ApiOperation({ summary: 'Remove a campaign attachment' })
+  async removeAttachment(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+    @Param('filename') filename: string,
+  ) {
+    return this.campaignsService.removeAttachment(orgId, campaignId, filename);
   }
 }

@@ -2,11 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { Types } from 'mongoose';
+import * as fs from 'fs';
+import * as path from 'path';
 import { CampaignsService } from './campaigns.service';
 import { Campaign } from '../schemas/campaign.schema';
 import { CampaignRecipient } from '../schemas/campaign-recipient.schema';
 import { AudienceCompilerService } from './audience-compiler.service';
 import { AuditLogEmitter } from '../../audit-logs/audit-log-emitter';
+import { StorageService } from '../../storage/storage.service';
 
 const mockCampaign = {
   _id: new Types.ObjectId('60c72b2f9b1d8e2b8c8d8888'),
@@ -35,6 +38,7 @@ class MockCampaignModel {
   static find = jest.fn();
   static countDocuments = jest.fn();
   static findOneAndUpdate = jest.fn();
+  static findByIdAndUpdate = jest.fn();
   static updateOne = jest.fn();
   static create = jest.fn();
 }
@@ -47,6 +51,13 @@ const mockAudienceCompiler = {
 
 const mockAuditLogEmitter = {
   emit: jest.fn(),
+};
+
+const mockStorageService = {
+  uploadFile: jest.fn(),
+  deleteFile: jest.fn(),
+  exists: jest.fn(),
+  getObjectStream: jest.fn(),
 };
 
 describe('CampaignsService', () => {
@@ -74,6 +85,10 @@ describe('CampaignsService', () => {
         {
           provide: AuditLogEmitter,
           useValue: mockAuditLogEmitter,
+        },
+        {
+          provide: StorageService,
+          useValue: mockStorageService,
         },
       ],
     }).compile();
@@ -203,6 +218,107 @@ describe('CampaignsService', () => {
       expect(result.status).toBe('scheduled');
       expect(result.totalRecipients).toBe(8);
       expect(targetCampaign.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('Campaign Attachments', () => {
+    describe('addAttachment', () => {
+      it('should successfully add an attachment', async () => {
+        const targetCampaign = {
+          ...mockCampaign,
+          status: 'draft',
+          attachments: [],
+          save: jest.fn(),
+        };
+        jest.spyOn(service, 'getCampaign').mockResolvedValue(targetCampaign as any);
+        campaignModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            ...targetCampaign,
+            attachments: [{ filename: 'test.txt', path: 's3Key', mimetype: 'text/plain', size: 12 }],
+          }),
+        });
+        mockStorageService.uploadFile.mockResolvedValue('s3Key');
+
+        const testFileDir = path.join(process.cwd(), 'uploads');
+        if (!fs.existsSync(testFileDir)) {
+          fs.mkdirSync(testFileDir, { recursive: true });
+        }
+        const tempFilePath = path.join(testFileDir, 'test-camp-upload.txt');
+        fs.writeFileSync(tempFilePath, 'some content');
+
+        const mockFile = {
+          fieldname: 'file',
+          originalname: 'test.txt',
+          encoding: '7bit',
+          mimetype: 'text/plain',
+          size: 12,
+          destination: testFileDir,
+          filename: 'test-camp-upload.txt',
+          path: tempFilePath,
+          buffer: Buffer.from('some content'),
+        } as Express.Multer.File;
+
+        const result = await service.addAttachment(
+          '60c72b2f9b1d8b2a3c8d1011',
+          '60c72b2f9b1d8e2b8c8d8888',
+          mockFile,
+        );
+
+        expect(result).toBeDefined();
+        expect(result.attachments).toBeDefined();
+        expect(result.attachments![0]!.filename).toBe('test.txt');
+        expect(mockStorageService.uploadFile).toHaveBeenCalled();
+        expect(fs.existsSync(tempFilePath)).toBe(false);
+      });
+
+      it('should throw BadRequestException if size exceeds 5MB', async () => {
+        const targetCampaign = {
+          ...mockCampaign,
+          status: 'draft',
+        };
+        jest.spyOn(service, 'getCampaign').mockResolvedValue(targetCampaign as any);
+
+        const mockFile = {
+          originalname: 'large.mp4',
+          size: 6 * 1024 * 1024,
+          path: 'somepath',
+        } as Express.Multer.File;
+
+        await expect(
+          service.addAttachment(
+            '60c72b2f9b1d8b2a3c8d1011',
+            '60c72b2f9b1d8e2b8c8d8888',
+            mockFile,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('removeAttachment', () => {
+      it('should successfully remove an attachment', async () => {
+        const targetCampaign = {
+          ...mockCampaign,
+          status: 'draft',
+          attachments: [{ filename: 'test.txt', path: 's3Key', mimetype: 'text/plain', size: 100 }],
+        };
+        jest.spyOn(service, 'getCampaign').mockResolvedValue(targetCampaign as any);
+        campaignModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            ...targetCampaign,
+            attachments: [],
+          }),
+        });
+
+        const result = await service.removeAttachment(
+          '60c72b2f9b1d8b2a3c8d1011',
+          '60c72b2f9b1d8e2b8c8d8888',
+          'test.txt',
+        );
+
+        expect(result).toBeDefined();
+        expect(result.attachments).toEqual([]);
+        expect(mockStorageService.deleteFile).toHaveBeenCalledWith('s3Key');
+      });
     });
   });
 });

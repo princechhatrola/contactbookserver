@@ -58,6 +58,22 @@ export class Campaign {
 
   @Prop({ type: Boolean, default: false, index: true })
   isDeleted: boolean;
+
+  @Prop({
+    type: [{
+      filename: { type: String, required: true },
+      path: { type: String, required: true },
+      mimetype: { type: String, required: true },
+      size: { type: Number, required: true },
+    }],
+    default: [],
+  })
+  attachments?: {
+    filename: string;
+    path: string;
+    mimetype: string;
+    size: number;
+  }[];
 }
 
 export const CampaignSchema = SchemaFactory.createForClass(Campaign);
