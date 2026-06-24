@@ -194,8 +194,31 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
     const compiledSubject = this.compile(template.subject, mockVariables);
     const compiledHtml = this.compile(template.htmlContent, mockVariables);
 
-    // 4. Dispatch Email directly (bypassing BullMQ)
-    await this.sendMailDirect(provider, sender, dto.recipientEmail, compiledSubject, compiledHtml);
+    // 4. Load template attachments as Buffers
+    const emailAttachments: any[] = [];
+    if (template.attachments && template.attachments.length > 0) {
+      for (const att of template.attachments) {
+        try {
+          const stream = await this.storageService.getObjectStream(att.path);
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk));
+          }
+          const buffer = Buffer.concat(chunks);
+          emailAttachments.push({
+            filename: att.filename,
+            content: buffer,
+            contentType: att.mimetype,
+          });
+        } catch (err: any) {
+          this.logger.error(`Failed to load template attachment ${att.filename} from storage: ${err.message}`);
+          throw new Error(`Attachment load error for file ${att.filename}: ${err.message}`);
+        }
+      }
+    }
+
+    // 5. Dispatch Email directly (bypassing BullMQ)
+    await this.sendMailDirect(provider, sender, dto.recipientEmail, compiledSubject, compiledHtml, emailAttachments);
   }
 
   private async sendMailDirect(
@@ -204,12 +227,13 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
     to: string,
     subject: string,
     html: string,
+    attachments: any[] = [],
   ): Promise<void> {
     const credentials = this.emailProvidersService.getDecryptedCredentials(provider);
 
     // If sandbox / local testing credentials, mock dispatch
     if (credentials.apiKey === 'mock_test_key' || credentials.pass === 'mock_test_pass') {
-      this.logger.log(`[MOCK EMAIL SEND] Engine: ${provider.type} | From: "${sender.name}" <${sender.email}> | To: ${to} | Subject: ${subject}`);
+      this.logger.log(`[MOCK EMAIL SEND] Engine: ${provider.type} | From: "${sender.name}" <${sender.email}> | To: ${to} | Subject: ${subject} | Attachments: ${attachments.length}`);
       return;
     }
 
@@ -231,11 +255,19 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
           to,
           subject,
           html,
+          attachments,
         });
         break;
       }
 
       case ProviderType.SENDGRID: {
+        const sendgridAttachments = attachments.map(att => ({
+          content: att.content.toString('base64'),
+          filename: att.filename,
+          type: att.contentType,
+          disposition: 'attachment',
+        }));
+
         const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method: 'POST',
           headers: {
@@ -247,6 +279,7 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
             from: { email: sender.email, name: sender.name },
             subject,
             content: [{ type: 'text/html', value: html }],
+            attachments: sendgridAttachments.length > 0 ? sendgridAttachments : undefined,
           }),
         });
         if (res.status >= 400) {
@@ -257,6 +290,11 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
       }
 
       case ProviderType.RESEND: {
+        const resendAttachments = attachments.map(att => ({
+          content: att.content.toString('base64'),
+          filename: att.filename,
+        }));
+
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -268,6 +306,7 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
             to,
             subject,
             html,
+            attachments: resendAttachments.length > 0 ? resendAttachments : undefined,
           }),
         });
         if (res.status >= 400) {
@@ -281,19 +320,37 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
         const domain = credentials.domain || 'sandbox';
         const mgHost = credentials.host || 'api.mailgun.net';
         const auth = Buffer.from(`api:${credentials.apiKey}`).toString('base64');
-        const form = new URLSearchParams();
-        form.append('from', `"${sender.name}" <${sender.email}>`);
-        form.append('to', to);
-        form.append('subject', subject);
-        form.append('html', html);
+        
+        let body: any;
+        let headers: any = {
+          Authorization: `Basic ${auth}`,
+        };
+
+        if (attachments && attachments.length > 0) {
+          const form = new FormData();
+          form.append('from', `"${sender.name}" <${sender.email}>`);
+          form.append('to', to);
+          form.append('subject', subject);
+          form.append('html', html);
+          for (const att of attachments) {
+            const blob = new Blob([att.content], { type: att.contentType });
+            form.append('attachment', blob, att.filename);
+          }
+          body = form;
+        } else {
+          const form = new URLSearchParams();
+          form.append('from', `"${sender.name}" <${sender.email}>`);
+          form.append('to', to);
+          form.append('subject', subject);
+          form.append('html', html);
+          body = form.toString();
+          headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        }
 
         const res = await fetch(`https://${mgHost}/v3/${domain}/messages`, {
           method: 'POST',
-          headers: {
-            Authorization: `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: form.toString(),
+          headers,
+          body,
         });
         if (res.status >= 400) {
           const text = await res.text();
