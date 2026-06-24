@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as path from 'path';
+import * as fs from 'fs';
 import { EmailTemplatesService } from './services/email-templates.service';
 import { CreateEmailTemplateDto } from './dto/create-email-template.dto';
 import { UpdateEmailTemplateDto } from './dto/update-email-template.dto';
@@ -11,9 +12,13 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
 
-const TEMPLATE_ATTACHMENT_UPLOAD_DIR = process.env.NODE_ENV === 'test'
+const TEMPLATE_ATTACHMENT_UPLOAD_DIR = process.env.NODE_ENV === 'test' || process.env.VERCEL === '1'
   ? path.join('/tmp', 'uploads', 'template-attachments')
   : path.join(process.cwd(), 'uploads', 'template-attachments');
+
+if (!fs.existsSync(TEMPLATE_ATTACHMENT_UPLOAD_DIR)) {
+  fs.mkdirSync(TEMPLATE_ATTACHMENT_UPLOAD_DIR, { recursive: true });
+}
 
 @ApiTags('Email Templates')
 @ApiBearerAuth()

@@ -18,7 +18,9 @@ export class StorageService implements OnModuleInit {
   private s3Client: S3Client | null = null;
   private bucketName: string | null = null;
   private isS3Enabled = false;
-  private readonly localStorageDir = path.join(process.cwd(), 'uploads');
+  private readonly localStorageDir = process.env.VERCEL === '1'
+    ? path.join('/tmp', 'uploads')
+    : path.join(process.cwd(), 'uploads');
 
   constructor(private readonly configService: ConfigService) {}
 
