@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as nodemailer from 'nodemailer';
+import * as fs from 'fs';
 import { BaseTenantRepository } from '../../../common/repositories/base-tenant.repository';
 import { EmailTemplate, EmailTemplateDocument } from '../schemas/email-template.schema';
 import { CreateEmailTemplateDto } from '../dto/create-email-template.dto';
@@ -10,6 +11,7 @@ import { SendTestEmailDto } from '../dto/send-test-email.dto';
 import { EmailProvidersService } from './email-providers.service';
 import { SenderIdentitiesService } from './sender-identities.service';
 import { ProviderType } from '../schemas/email-provider.schema';
+import { StorageService } from '../../storage/storage.service';
 
 @Injectable()
 export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDocument> {
@@ -20,6 +22,7 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
     private readonly templateModel: Model<EmailTemplateDocument>,
     private readonly emailProvidersService: EmailProvidersService,
     private readonly senderIdentitiesService: SenderIdentitiesService,
+    private readonly storageService: StorageService,
   ) {
     super(templateModel);
   }
@@ -306,6 +309,90 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
 
       default:
         throw new BadRequestException(`Direct email dispatch not supported for provider engine type ${provider.type}`);
+    }
+  }
+
+  async addAttachment(
+    orgId: string,
+    templateId: string,
+    file: Express.Multer.File,
+  ): Promise<EmailTemplateDocument> {
+    const template = await this.getTemplate(orgId, templateId);
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Attachment size exceeds the maximum limit of 5MB.');
+    }
+
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const sanitizedFilename = file.originalname.replace(/\s+/g, '_');
+    const s3Key = `templates/${templateId}/attachments/${uniqueSuffix}-${sanitizedFilename}`;
+
+    try {
+      await this.storageService.uploadFile(file.path, s3Key);
+
+      const updated = await this.templateModel.findByIdAndUpdate(
+        templateId,
+        {
+          $push: {
+            attachments: {
+              filename: file.originalname,
+              path: s3Key,
+              mimetype: file.mimetype,
+              size: file.size,
+            },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`Email template with ID ${templateId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to upload attachment: ${err.message}`);
+    } finally {
+      if (fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (_) {}
+      }
+    }
+  }
+
+  async removeAttachment(
+    orgId: string,
+    templateId: string,
+    filename: string,
+  ): Promise<EmailTemplateDocument> {
+    const template = await this.getTemplate(orgId, templateId);
+
+    const attachment = template.attachments?.find((att) => att.filename === filename);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment "${filename}" not found in this email template.`);
+    }
+
+    try {
+      await this.storageService.deleteFile(attachment.path);
+
+      const updated = await this.templateModel.findByIdAndUpdate(
+        templateId,
+        {
+          $pull: {
+            attachments: { filename },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`Email template with ID ${templateId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to remove attachment: ${err.message}`);
     }
   }
 }

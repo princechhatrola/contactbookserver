@@ -186,10 +186,14 @@ export class SendEmailProcessor extends WorkerHost {
           compiledHtml += trackingPayload;
         }
 
-        // 7.5 Load campaign attachments as Buffers
+        // 7.5 Load campaign and template attachments as Buffers
         const emailAttachments: any[] = [];
-        if (campaign.attachments && campaign.attachments.length > 0) {
-          for (const att of campaign.attachments) {
+        const allAttachments = [
+          ...(campaign.attachments || []),
+          ...(template.attachments || []),
+        ];
+        if (allAttachments.length > 0) {
+          for (const att of allAttachments) {
             try {
               const stream = await this.storageService.getObjectStream(att.path);
               const chunks: Buffer[] = [];

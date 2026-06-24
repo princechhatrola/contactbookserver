@@ -5,6 +5,7 @@ import { EmailTemplatesService } from './email-templates.service';
 import { EmailTemplate } from '../schemas/email-template.schema';
 import { EmailProvidersService } from './email-providers.service';
 import { SenderIdentitiesService } from './sender-identities.service';
+import { StorageService } from '../../storage/storage.service';
 
 const mockTemplate: any = {
   _id: '60c72b2f9b1d8b2a3c8d1099',
@@ -35,6 +36,9 @@ class MockEmailTemplateModel {
   static updateOne = jest.fn().mockReturnValue({
     exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
   });
+  static findByIdAndUpdate = jest.fn().mockReturnValue({
+    exec: jest.fn().mockResolvedValue(mockTemplate),
+  });
 }
 
 describe('EmailTemplatesService', () => {
@@ -42,14 +46,22 @@ describe('EmailTemplatesService', () => {
   let model: any;
   let providersService: any;
   let sendersService: any;
+  let module: TestingModule;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         EmailTemplatesService,
         {
           provide: getModelToken(EmailTemplate.name),
           useValue: MockEmailTemplateModel,
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            uploadFile: jest.fn().mockResolvedValue(undefined),
+            deleteFile: jest.fn().mockResolvedValue(undefined),
+          },
         },
         {
           provide: EmailProvidersService,
@@ -176,6 +188,81 @@ describe('EmailTemplatesService', () => {
       ).resolves.not.toThrow();
 
       expect(providersService.getDecryptedCredentials).toHaveBeenCalled();
+    });
+  });
+
+  describe('Email Template Attachments', () => {
+    it('should successfully add attachment details to template record', async () => {
+      const mockFile: any = {
+        originalname: 'test_doc.pdf',
+        mimetype: 'application/pdf',
+        path: '/tmp/test_doc.pdf',
+        size: 200,
+      };
+
+      const mockStorage = module.get<StorageService>(StorageService);
+      const uploadSpy = jest.spyOn(mockStorage, 'uploadFile').mockResolvedValue(undefined);
+
+      jest.spyOn(model, 'findByIdAndUpdate').mockReturnValue({
+        exec: jest.fn().mockResolvedValue({
+          ...mockTemplate,
+          attachments: [
+            {
+              filename: 'test_doc.pdf',
+              path: 'templates/60c72b2f9b1d8b2a3c8d1099/attachments/...',
+              mimetype: 'application/pdf',
+              size: 200,
+            },
+          ],
+        }),
+      } as any);
+
+      const result = await service.addAttachment(
+        '60c72b2f9b1d8b2a3c8d1011',
+        '60c72b2f9b1d8b2a3c8d1099',
+        mockFile,
+      );
+
+      expect(result.attachments).toBeDefined();
+      expect(result.attachments![0]!.filename).toBe('test_doc.pdf');
+      expect(uploadSpy).toHaveBeenCalled();
+    });
+
+    it('should remove attachment details and purge it from storage', async () => {
+      const mockTemplateWithAttachments = {
+        ...mockTemplate,
+        attachments: [
+          {
+            filename: 'test_doc.pdf',
+            path: 'templates/60c72b2f9b1d8b2a3c8d1099/attachments/test_doc.pdf',
+            mimetype: 'application/pdf',
+            size: 200,
+          },
+        ],
+      };
+
+      jest.spyOn(model, 'findOne').mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockTemplateWithAttachments),
+      } as any);
+
+      const mockStorage = module.get<StorageService>(StorageService);
+      const deleteSpy = jest.spyOn(mockStorage, 'deleteFile').mockResolvedValue(undefined);
+
+      jest.spyOn(model, 'findByIdAndUpdate').mockReturnValue({
+        exec: jest.fn().mockResolvedValue({
+          ...mockTemplate,
+          attachments: [],
+        }),
+      } as any);
+
+      const result = await service.removeAttachment(
+        '60c72b2f9b1d8b2a3c8d1011',
+        '60c72b2f9b1d8b2a3c8d1099',
+        'test_doc.pdf',
+      );
+
+      expect(result.attachments).toEqual([]);
+      expect(deleteSpy).toHaveBeenCalled();
     });
   });
 });
