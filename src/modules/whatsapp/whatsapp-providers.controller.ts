@@ -62,6 +62,7 @@ export class WhatsappProvidersController {
     return {
       status: provider.status,
       qrCode: provider.qrCode, // raw qr string to render as SVG/SVG-image on client
+      error: provider.error,
     };
   }
 

@@ -23,7 +23,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     try {
       // Bypasses CommonJS require() transpilation of import() at compile time
-      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
+      this.baileys = await import('@whiskeysockets/baileys');
 
       // Auto-resume sessions that were previously connected
       const activeProviders = await this.providerModel.find({
@@ -70,75 +70,92 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
       return this.sockets.get(providerId);
     }
 
-    if (!this.baileys) {
-      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
-    }
-
-    const authState = await this.getMongoAuthState(providerId);
-    const makeWASocket = this.baileys.default || this.baileys;
-    const sock = makeWASocket({
-      auth: authState.state,
-      logger: pino({ level: 'silent' }) as any,
-      printQRInTerminal: false,
-    });
-
-    this.sockets.set(providerId, sock);
-
-    sock.ev.on('creds.update', authState.saveCreds);
-
-    sock.ev.on('connection.update', async (update: any) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        // Save QR code so the frontend can retrieve it
-        await this.providerModel.findByIdAndUpdate(providerId, {
-          status: WhatsappProviderStatus.QR_READY,
-          qrCode: qr,
-        });
+    try {
+      if (!this.baileys) {
+        this.baileys = await import('@whiskeysockets/baileys');
       }
 
-      if (connection === 'close') {
-        const lastDisconnectError = lastDisconnect?.error as Boom;
-        const statusCode = lastDisconnectError?.output?.statusCode;
-        const shouldReconnect = statusCode !== this.baileys.DisconnectReason.loggedOut;
-        
-        this.logger.warn(`Connection closed for provider ${providerId}. StatusCode: ${statusCode}. Reconnecting: ${shouldReconnect}`);
-        
-        this.sockets.delete(providerId);
+      const authState = await this.getMongoAuthState(providerId);
+      const makeWASocket = this.baileys.default || this.baileys;
+      const sock = makeWASocket({
+        auth: authState.state,
+        logger: pino({ level: 'silent' }) as any,
+        printQRInTerminal: false,
+      });
 
-        if (shouldReconnect) {
-          // Reconnect automatically
-          this.initSession(providerId);
-        } else {
-          // Logged out: Clear session data and mark as disconnected
-          await this.sessionModel.deleteMany({ providerId }).exec();
+      this.sockets.set(providerId, sock);
+
+      sock.ev.on('creds.update', authState.saveCreds);
+
+      sock.ev.on('connection.update', async (update: any) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          // Save QR code so the frontend can retrieve it
           await this.providerModel.findByIdAndUpdate(providerId, {
-            status: WhatsappProviderStatus.DISCONNECTED,
-            qrCode: undefined,
-            phoneNumber: undefined,
+            status: WhatsappProviderStatus.QR_READY,
+            qrCode: qr,
+            error: undefined,
           });
         }
-      } else if (connection === 'open') {
-        const jid = sock.user?.id;
-        const phoneNumber = jid ? jid.split(':')[0] : undefined;
 
-        this.logger.log(`WhatsApp connection opened successfully for JID: ${jid}`);
-        
-        await this.providerModel.findByIdAndUpdate(providerId, {
-          status: WhatsappProviderStatus.CONNECTED,
-          qrCode: undefined,
-          phoneNumber,
-        });
-      }
-    });
+        if (connection === 'close') {
+          const lastDisconnectError = lastDisconnect?.error as Boom;
+          const statusCode = lastDisconnectError?.output?.statusCode;
+          const errorMessage = lastDisconnectError?.message || lastDisconnectError?.toString() || 'Connection closed';
+          const shouldReconnect = statusCode !== this.baileys.DisconnectReason.loggedOut;
+          
+          this.logger.warn(`Connection closed for provider ${providerId}. StatusCode: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+          
+          this.sockets.delete(providerId);
 
-    return sock;
+          if (shouldReconnect) {
+            // Reconnect automatically: update status to connecting and record connection drop error
+            await this.providerModel.findByIdAndUpdate(providerId, {
+              status: WhatsappProviderStatus.CONNECTING,
+              error: `Connection closed: ${errorMessage} (status code: ${statusCode}). Reconnecting...`,
+            });
+            this.initSession(providerId).catch(() => {});
+          } else {
+            // Logged out: Clear session data and mark as disconnected
+            await this.sessionModel.deleteMany({ providerId }).exec();
+            await this.providerModel.findByIdAndUpdate(providerId, {
+              status: WhatsappProviderStatus.DISCONNECTED,
+              qrCode: undefined,
+              phoneNumber: undefined,
+              error: `Logged out: ${errorMessage} (status code: ${statusCode})`,
+            });
+          }
+        } else if (connection === 'open') {
+          const jid = sock.user?.id;
+          const phoneNumber = jid ? jid.split(':')[0] : undefined;
+
+          this.logger.log(`WhatsApp connection opened successfully for JID: ${jid}`);
+          
+          await this.providerModel.findByIdAndUpdate(providerId, {
+            status: WhatsappProviderStatus.CONNECTED,
+            qrCode: undefined,
+            phoneNumber,
+            error: undefined,
+          });
+        }
+      });
+
+      return sock;
+    } catch (err: any) {
+      this.logger.error(`Failed to initialize session for provider ${providerId}: ${err.message}`);
+      await this.providerModel.findByIdAndUpdate(providerId, {
+        status: WhatsappProviderStatus.ERROR,
+        error: `Initialization failed: ${err.message}`,
+      });
+      throw err;
+    }
   }
 
   // MongoDB Adapter for Baileys State Management
   private async getMongoAuthState(providerId: string) {
     if (!this.baileys) {
-      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
+      this.baileys = await import('@whiskeysockets/baileys');
     }
 
     const writeData = async (data: any, key: string) => {

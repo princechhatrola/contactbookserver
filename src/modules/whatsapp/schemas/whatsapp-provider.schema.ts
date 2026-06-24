@@ -40,6 +40,9 @@ export class WhatsappProvider {
   @Prop({ type: Number, default: 1 })
   priority: number; // For rotation order (lower = higher priority)
 
+  @Prop({ trim: true })
+  error?: string; // Connection or initialization error messages
+
   @Prop({ type: Boolean, default: false, index: true })
   isDeleted: boolean;
 }
