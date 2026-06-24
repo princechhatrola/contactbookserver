@@ -1,12 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import makeWASocket, { 
-  BufferJSON, 
-  DisconnectReason, 
-  initAuthCreds, 
-  proto 
-} from '@whiskeysockets/baileys';
+// Baileys types are not statically imported to prevent TS from generating a require() call for the ESM package.
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import { WhatsappProvider, WhatsappProviderDocument, WhatsappProviderStatus } from '../schemas/whatsapp-provider.schema';
@@ -16,6 +11,7 @@ import { WhatsappSession, WhatsappSessionDocument } from '../schemas/whatsapp-se
 export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WhatsappSessionManager.name);
   private sockets = new Map<string, any>(); // Map of providerId -> socket instance
+  private baileys: any = null; // Loaded dynamically to prevent require() of ES Module errors
 
   constructor(
     @InjectModel(WhatsappProvider.name)
@@ -25,8 +21,11 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
-    // Auto-resume sessions that were previously connected
     try {
+      // Bypasses CommonJS require() transpilation of import() at compile time
+      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
+
+      // Auto-resume sessions that were previously connected
       const activeProviders = await this.providerModel.find({
         status: WhatsappProviderStatus.CONNECTED,
         isDeleted: { $ne: true },
@@ -71,7 +70,12 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
       return this.sockets.get(providerId);
     }
 
+    if (!this.baileys) {
+      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
+    }
+
     const authState = await this.getMongoAuthState(providerId);
+    const makeWASocket = this.baileys.default || this.baileys;
     const sock = makeWASocket({
       auth: authState.state,
       logger: pino({ level: 'silent' }) as any,
@@ -82,7 +86,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
 
     sock.ev.on('creds.update', authState.saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('connection.update', async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -96,7 +100,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
       if (connection === 'close') {
         const lastDisconnectError = lastDisconnect?.error as Boom;
         const statusCode = lastDisconnectError?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const shouldReconnect = statusCode !== this.baileys.DisconnectReason.loggedOut;
         
         this.logger.warn(`Connection closed for provider ${providerId}. StatusCode: ${statusCode}. Reconnecting: ${shouldReconnect}`);
         
@@ -133,8 +137,12 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
 
   // MongoDB Adapter for Baileys State Management
   private async getMongoAuthState(providerId: string) {
+    if (!this.baileys) {
+      this.baileys = await Function('return import("@whiskeysockets/baileys")')();
+    }
+
     const writeData = async (data: any, key: string) => {
-      const serialized = JSON.stringify(data, BufferJSON.replacer);
+      const serialized = JSON.stringify(data, this.baileys.BufferJSON.replacer);
       await this.sessionModel.updateOne(
         { providerId, key },
         { data: serialized },
@@ -145,7 +153,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
     const readData = async (key: string) => {
       const doc = await this.sessionModel.findOne({ providerId, key }).exec();
       if (!doc) return null;
-      return JSON.parse(doc.data, BufferJSON.reviver);
+      return JSON.parse(doc.data, this.baileys.BufferJSON.reviver);
     };
 
     const removeData = async (key: string) => {
@@ -154,7 +162,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
 
     let creds = await readData('creds');
     if (!creds) {
-      creds = initAuthCreds();
+      creds = this.baileys.initAuthCreds();
       await writeData(creds, 'creds');
     }
 
@@ -169,7 +177,7 @@ export class WhatsappSessionManager implements OnModuleInit, OnModuleDestroy {
                 let value = await readData(`${type}:${id}`);
                 if (value) {
                   if (type === 'app-state-sync-key') {
-                    value = proto.Message.AppStateSyncKeyData.fromObject(value);
+                    value = this.baileys.proto.Message.AppStateSyncKeyData.fromObject(value);
                   }
                   data[id] = value;
                 }
