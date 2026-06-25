@@ -149,8 +149,24 @@ export class CampaignsController {
     @Param('id') campaignId: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('status') status?: string,
   ) {
-    return this.campaignsService.getCampaignRecipients(orgId, campaignId, page, limit);
+    return this.campaignsService.getCampaignRecipients(orgId, campaignId, page, limit, status);
+  }
+
+  @Post(':id/resend')
+  @ApiOperation({ summary: 'Create a follow-up campaign targeting recipients with a specific status' })
+  async resendCampaign(
+    @GetUser('organizationId') orgId: string,
+    @GetUser('id') userId: string,
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @Body('name') name?: string,
+  ) {
+    if (!status) {
+      throw new BadRequestException('Status is required for resending');
+    }
+    return this.campaignsService.createFollowUpCampaign(orgId, userId, id, status, name);
   }
 
   @Get(':id/events/summary')

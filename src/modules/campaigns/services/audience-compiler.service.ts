@@ -58,6 +58,11 @@ export class AudienceCompilerService {
       }
     }
 
+    // Filter by specific contact IDs
+    if (dto.contactIds && dto.contactIds.length > 0) {
+      filter._id = { $in: dto.contactIds.map(id => new Types.ObjectId(id)) };
+    }
+
     return filter;
   }
 

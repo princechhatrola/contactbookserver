@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { WhatsappCampaignsService } from './services/whatsapp-campaigns.service';
 import { WhatsappAudienceCompilerService } from './services/whatsapp-audience-compiler.service';
@@ -135,7 +135,23 @@ export class WhatsappCampaignsController {
     @Param('id') campaignId: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('status') status?: string,
   ) {
-    return this.campaignsService.getCampaignRecipients(orgId, campaignId, page, limit);
+    return this.campaignsService.getCampaignRecipients(orgId, campaignId, page, limit, status);
+  }
+
+  @Post(':id/resend')
+  @ApiOperation({ summary: 'Create a follow-up WhatsApp campaign targeting recipients with a specific status' })
+  async resendCampaign(
+    @GetUser('organizationId') orgId: string,
+    @GetUser('id') userId: string,
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @Body('name') name?: string,
+  ) {
+    if (!status) {
+      throw new BadRequestException('Status is required for resending');
+    }
+    return this.campaignsService.createFollowUpCampaign(orgId, userId, id, status, name);
   }
 }

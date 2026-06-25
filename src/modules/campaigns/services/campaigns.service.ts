@@ -229,15 +229,20 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
     campaignId: string,
     page = 1,
     limit = 10,
+    status?: string,
   ): Promise<{ data: CampaignRecipientDocument[]; total: number; page: number; limit: number; pages: number }> {
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.max(1, Math.min(100, Number(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = {
+    const filter: any = {
       organizationId: new Types.ObjectId(orgId),
       campaignId: new Types.ObjectId(campaignId),
     };
+
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
 
     const [data, total] = await Promise.all([
       this.recipientModel.find(filter)
@@ -348,5 +353,48 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
     } catch (err: any) {
       throw new BadRequestException(`Failed to remove attachment: ${err.message}`);
     }
+  }
+
+  async createFollowUpCampaign(
+    orgId: string,
+    userId: string,
+    campaignId: string,
+    status: string,
+    name?: string,
+  ): Promise<CampaignDocument> {
+    const original = await this.getCampaign(orgId, campaignId);
+
+    const recipients = await this.recipientModel.find({
+      organizationId: new Types.ObjectId(orgId),
+      campaignId: new Types.ObjectId(campaignId),
+      status,
+    }).exec();
+
+    if (recipients.length === 0) {
+      throw new BadRequestException(`No matching recipients found with status "${status}"`);
+    }
+
+    const contactIds = recipients.map(r => r.contactId.toString());
+
+    const duplicated = new this.campaignModel({
+      organizationId: original.organizationId,
+      name: name || `${original.name} (Follow-up: ${status})`,
+      subject: original.subject,
+      emailTemplateId: original.emailTemplateId,
+      emailProviderId: original.emailProviderId,
+      senderIdentityId: original.senderIdentityId,
+      segmentFilters: {
+        ...original.segmentFilters,
+        contactIds,
+      },
+      status: 'draft',
+      totalRecipients: 0,
+      sentRecipients: 0,
+      failedRecipients: 0,
+      isDeleted: false,
+      createdById: new Types.ObjectId(userId),
+    });
+
+    return duplicated.save();
   }
 }

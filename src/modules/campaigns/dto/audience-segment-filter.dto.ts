@@ -21,4 +21,9 @@ export class AudienceSegmentFilterDto {
   @IsObject()
   @IsOptional()
   customFields?: Record<string, any>;
+
+  @ApiProperty({ description: 'Filter by specific contact IDs', type: [String], required: false })
+  @IsArray()
+  @IsOptional()
+  contactIds?: string[];
 }
