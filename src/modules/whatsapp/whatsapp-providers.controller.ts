@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, HttpStatus, HttpCode, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, HttpStatus, HttpCode, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { WhatsappProvidersService } from './services/whatsapp-providers.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -84,5 +84,18 @@ export class WhatsappProvidersController {
     @Body('priority') priority: number,
   ) {
     return this.providersService.updatePriority(orgId, id, priority);
+  }
+
+  @Post(':id/test')
+  @ApiOperation({ summary: 'Send a test WhatsApp message using this account (Org Admin only)' })
+  async testConnection(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') id: string,
+    @Body('phoneNumber') phoneNumber: string,
+  ) {
+    if (!phoneNumber || !phoneNumber.trim()) {
+      throw new BadRequestException('Phone number is required');
+    }
+    return this.providersService.sendTestMessage(orgId, id, phoneNumber);
   }
 }

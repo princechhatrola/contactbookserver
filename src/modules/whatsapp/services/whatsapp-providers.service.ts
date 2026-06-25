@@ -86,4 +86,38 @@ export class WhatsappProvidersService extends BaseTenantRepository<WhatsappProvi
 
     return updated;
   }
+
+  async sendTestMessage(orgId: string, providerId: string, phoneNumber: string): Promise<{ success: boolean; messageId: string }> {
+    const provider = await this.getProvider(orgId, providerId);
+    
+    if (provider.status !== WhatsappProviderStatus.CONNECTED) {
+      throw new BadRequestException(`WhatsApp provider is not connected. Current status: ${provider.status}`);
+    }
+
+    try {
+      const socket = await this.sessionManager.getSocket(providerId);
+      if (!socket) {
+        throw new Error('Failed to retrieve active socket session');
+      }
+
+      const cleanPhone = phoneNumber.replace(/[^\d]/g, '');
+      const jid = `${cleanPhone}@s.whatsapp.net`;
+      
+      const messageText = `Hello! This is a test message from your ContactFlow SaaS connection: *${provider.name}*. Connection is verified successfully!`;
+      
+      // Simulating a minor typing composer update
+      await socket.sendPresenceUpdate('composing', jid);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      const response = await socket.sendMessage(jid, { text: messageText });
+      
+      return { 
+        success: true, 
+        messageId: response?.key?.id || 'unknown' 
+      };
+    } catch (err: any) {
+      this.logger.error(`Failed to send test message from provider ${providerId}: ${err.message}`);
+      throw new BadRequestException(`Failed to send test message: ${err.message}`);
+    }
+  }
 }
