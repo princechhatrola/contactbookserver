@@ -27,4 +27,8 @@ export class CreateWhatsappCampaignDto {
   @IsObject()
   @IsNotEmpty()
   segmentFilters: AudienceSegmentFilterDto;
+
+  @ApiProperty({ description: 'Campaign Attachments', required: false })
+  @IsOptional()
+  attachments?: any[];
 }
