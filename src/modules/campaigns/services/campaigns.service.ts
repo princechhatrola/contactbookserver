@@ -237,11 +237,24 @@ export class CampaignsService extends BaseTenantRepository<CampaignDocument> {
 
     const filter: any = {
       organizationId: new Types.ObjectId(orgId),
-      campaignId: new Types.ObjectId(campaignId),
     };
 
+    if (campaignId && campaignId !== 'all' && Types.ObjectId.isValid(campaignId)) {
+      filter.campaignId = new Types.ObjectId(campaignId);
+    }
+
     if (status && status !== 'all') {
-      filter.status = status;
+      if (status === 'delivered') {
+        filter.status = { $in: ['sent', 'opened', 'clicked', 'replied'] };
+      } else if (status === 'opened') {
+        filter.openedAt = { $ne: null };
+      } else if (status === 'clicked') {
+        filter.clickedAt = { $ne: null };
+      } else if (status === 'sent_all') {
+        filter.status = { $in: ['sent', 'opened', 'clicked', 'replied', 'bounced', 'complaint', 'unsubscribed'] };
+      } else {
+        filter.status = status;
+      }
     }
 
     const [data, total] = await Promise.all([
