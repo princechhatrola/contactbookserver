@@ -8,6 +8,7 @@ import { EmailTemplatesService } from './services/email-templates.service';
 import { CreateEmailTemplateDto } from './dto/create-email-template.dto';
 import { UpdateEmailTemplateDto } from './dto/update-email-template.dto';
 import { SendTestEmailDto } from './dto/send-test-email.dto';
+import { GenerateHtmlDto } from './dto/generate-html.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
@@ -25,6 +26,14 @@ if (!fs.existsSync(TEMPLATE_ATTACHMENT_UPLOAD_DIR)) {
 @Controller('email-templates')
 export class EmailTemplatesController {
   constructor(private readonly templatesService: EmailTemplatesService) {}
+
+  @Post('generate-html')
+  @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Generate HTML content using LLM AI (Admin/Manager only)' })
+  @ApiResponse({ status: 200, description: 'HTML content generated successfully' })
+  async generateHtml(@Body() dto: GenerateHtmlDto) {
+    return this.templatesService.generateHtml(dto);
+  }
 
   @Post()
   @Roles(UserRole.ORG_ADMIN, UserRole.MANAGER)

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { EmailTemplatesService } from './email-templates.service';
 import { EmailTemplate } from '../schemas/email-template.schema';
 import { EmailProvidersService } from './email-providers.service';
@@ -263,6 +263,128 @@ describe('EmailTemplatesService', () => {
 
       expect(result.attachments).toEqual([]);
       expect(deleteSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('generateHtml', () => {
+    let originalEnv: NodeJS.ProcessEnv;
+
+    beforeEach(() => {
+      originalEnv = { ...process.env };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('should throw BadRequestException if LLM_API_KEY is not defined', async () => {
+      delete process.env.LLM_API_KEY;
+
+      await expect(
+        service.generateHtml({ prompt: 'test prompt' })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should successfully make a request to the resolved endpoint, strip <think> blocks and return cleaned HTML', async () => {
+      process.env.LLM_API_KEY = 'test_key';
+      process.env.LLM_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: '<think>\nSome thoughts here...\n</think>\n```html\n<div>Hello World</div>\n```',
+            },
+          },
+        ],
+      };
+
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+      global.fetch = fetchMock;
+
+      const result = await service.generateHtml({
+        prompt: 'test prompt',
+        subject: 'test subject',
+        currentHtml: '<div>Current</div>',
+      });
+
+      expect(result.html).toBe('<div>Hello World</div>');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.openai.com/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test_key',
+            'Content-Type': 'application/json',
+          }),
+        })
+      );
+    });
+
+    it('should automatically append x-rotation-strategy headers for serverllm.umanginfo.me', async () => {
+      process.env.LLM_API_KEY = 'test_key';
+      process.env.LLM_ENDPOINT = 'https://serverllm.umanginfo.me/api/v1/proxy/chat/completions';
+
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: '<div>Proxy OK</div>',
+            },
+          },
+        ],
+      };
+
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+      global.fetch = fetchMock;
+
+      const result = await service.generateHtml({ prompt: 'test prompt' });
+
+      expect(result.html).toBe('<div>Proxy OK</div>');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://serverllm.umanginfo.me/api/v1/proxy/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'x-rotation-strategy': 'priority',
+          }),
+        })
+      );
+    });
+
+    it('should fall back to Gemini OpenAI endpoint if key starts with AIzaSy and no endpoint provided', async () => {
+      process.env.LLM_API_KEY = 'AIzaSyTestKey';
+      delete process.env.LLM_ENDPOINT;
+      delete process.env.LLM_MODEL;
+
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: '<html>Hello Gemini</html>',
+            },
+          },
+        ],
+      };
+
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+      global.fetch = fetchMock;
+
+      const result = await service.generateHtml({ prompt: 'test prompt' });
+
+      expect(result.html).toBe('<html>Hello Gemini</html>');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+        expect.any(Object)
+      );
     });
   });
 });

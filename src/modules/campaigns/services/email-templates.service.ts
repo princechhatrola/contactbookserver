@@ -12,6 +12,32 @@ import { EmailProvidersService } from './email-providers.service';
 import { SenderIdentitiesService } from './sender-identities.service';
 import { ProviderType } from '../schemas/email-provider.schema';
 import { StorageService } from '../../storage/storage.service';
+import { GenerateHtmlDto } from '../dto/generate-html.dto';
+
+interface ChatCompletionMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface ChatCompletionRequest {
+  model: string;
+  messages: ChatCompletionMessage[];
+  temperature?: number;
+  max_tokens?: number;
+}
+
+interface ChatCompletionChoice {
+  message?: {
+    content?: string;
+  };
+}
+
+interface ChatCompletionResponse {
+  choices?: ChatCompletionChoice[];
+  error?: {
+    message?: string;
+  };
+}
 
 @Injectable()
 export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDocument> {
@@ -452,4 +478,119 @@ export class EmailTemplatesService extends BaseTenantRepository<EmailTemplateDoc
       throw new BadRequestException(`Failed to remove attachment: ${err.message}`);
     }
   }
+
+  async generateHtml(dto: GenerateHtmlDto): Promise<{ html: string }> {
+    const apiKey = process.env.LLM_API_KEY;
+    let endpoint = process.env.LLM_ENDPOINT;
+    let model = process.env.LLM_MODEL || 'gpt-4o-mini';
+
+    if (!apiKey) {
+      throw new BadRequestException('AI HTML generation is not configured. Please set LLM_API_KEY in the environment.');
+    }
+
+    // Resolve endpoint and default model if not provided
+    if (!endpoint) {
+      if (apiKey.startsWith('AIzaSy')) {
+        endpoint = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+        model = process.env.LLM_MODEL || 'gemini-1.5-flash';
+      } else {
+        endpoint = 'https://api.openai.com/v1/chat/completions';
+      }
+    } else {
+      if (!endpoint.endsWith('/chat/completions') && !endpoint.endsWith('/completions')) {
+        const base = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+        endpoint = `${base}/chat/completions`;
+      }
+    }
+
+    const promptText = `
+You are an expert HTML email designer. Your task is to generate a fully responsive, clean, and modern HTML email template based on the user's request.
+
+User Request: "${dto.prompt}"
+${dto.subject ? `Email Subject Context: "${dto.subject}"` : ''}
+${dto.currentHtml ? `Current HTML (modify, rewrite, or shorten this template as requested by the user):
+\`\`\`html
+${dto.currentHtml}
+\`\`\`
+
+IMPORTANT REFINEMENT RULES:
+- You MUST base your modifications directly on the "Current HTML" provided above.
+- Retain the general styling, theme, headers, and placeholders (such as {{firstName}}, etc.) unless the user explicitly requests to change them.
+- Focus specifically on applying the user's changes (e.g. making it shorter, changing colors, or adding sections) to the existing code rather than generating a completely new design from scratch.
+` : ''}
+
+CRITICAL RULES:
+1. Return ONLY valid, well-formed HTML code.
+2. DO NOT include any conversational text, explanations, or introductory remarks.
+3. DO NOT wrap the output in markdown code blocks (e.g., do not start with \`\`\`html and end with \`\`\`). Just return the raw HTML code starting with <!DOCTYPE html> or <html>.
+4. Make the design highly professional, responsive, and visually appealing. Use inline CSS or style blocks in the <head> that are email-client friendly.
+5. You can use standard template merge tags like {{firstName}}, {{lastName}}, {{company}}, {{email}} if appropriate.
+`;
+
+    const requestBody: ChatCompletionRequest = {
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert HTML template generator. You only output raw HTML, with no conversational text or markdown code fences.',
+        },
+        {
+          role: 'user',
+          content: promptText,
+        },
+      ],
+      temperature: 0.7,
+    };
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      };
+
+      const rotationStrategy = process.env.LLM_ROTATION_STRATEGY || (endpoint.includes('serverllm.umanginfo.me') ? 'priority' : undefined);
+      if (rotationStrategy) {
+        headers['x-rotation-strategy'] = rotationStrategy;
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        this.logger.error(`LLM API returned error: ${response.status} - ${text}`);
+        throw new BadRequestException(`LLM API returned error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as ChatCompletionResponse;
+      const responseText = data.choices?.[0]?.message?.content;
+
+      if (!responseText) {
+        throw new BadRequestException('Empty response received from LLM API.');
+      }
+
+      // Clean up response text (strip reasoning thought blocks and markdown fences)
+      let html = responseText.trim();
+      
+      // Strip <think>...</think> reasoning blocks if present
+      html = html.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+      if (html.startsWith('```')) {
+        html = html.replace(/^```[a-zA-Z0-9]*\s*/, '');
+        html = html.replace(/\s*```$/, '');
+      }
+
+      return { html: html.trim() };
+    } catch (err: any) {
+      this.logger.error(`Failed to generate HTML with LLM: ${err.message}`);
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+      throw new BadRequestException(`Failed to generate HTML: ${err.message}`);
+    }
+  }
 }
+
