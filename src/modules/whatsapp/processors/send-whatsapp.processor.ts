@@ -8,6 +8,7 @@ import { WhatsappCampaignRecipient, WhatsappCampaignRecipientDocument } from '..
 import { WhatsappProvider, WhatsappProviderDocument, WhatsappProviderStatus } from '../schemas/whatsapp-provider.schema';
 import { Contact, ContactDocument } from '../../contacts/schemas/contact.schema';
 import { WhatsappSessionManager } from '../services/whatsapp-session-manager.service';
+import { StorageService } from '../../storage/storage.service';
 
 @Processor('send-whatsapp-queue')
 export class SendWhatsappProcessor extends WorkerHost {
@@ -25,6 +26,7 @@ export class SendWhatsappProcessor extends WorkerHost {
     private readonly sessionManager: WhatsappSessionManager,
     @InjectQueue('send-whatsapp-queue')
     private readonly sendWhatsappQueue: Queue,
+    private readonly storageService: StorageService,
   ) {
     super();
   }
@@ -121,7 +123,49 @@ export class SendWhatsappProcessor extends WorkerHost {
         await this.sleep(delayJitter);
 
         // 9. Dispatch the WhatsApp Message
-        await socket.sendMessage(jid, { text: compiledText });
+        if (campaign.attachments && campaign.attachments.length > 0) {
+          // Send text message body first if it exists
+          if (compiledText && compiledText.trim() !== '') {
+            await socket.sendMessage(jid, { text: compiledText });
+          }
+
+          // Send each attachment as a separate message
+          for (const attachment of campaign.attachments) {
+            const stream = await this.storageService.getObjectStream(attachment.path);
+            const chunks: Buffer[] = [];
+            for await (const chunk of stream) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            const buffer = Buffer.concat(chunks);
+
+            const mimetype = attachment.mimetype.toLowerCase();
+            if (mimetype.startsWith('image/')) {
+              await socket.sendMessage(jid, {
+                image: buffer,
+                caption: attachment.filename
+              });
+            } else if (mimetype.startsWith('video/')) {
+              await socket.sendMessage(jid, {
+                video: buffer,
+                caption: attachment.filename
+              });
+            } else if (mimetype.startsWith('audio/')) {
+              await socket.sendMessage(jid, {
+                audio: buffer,
+                mimetype: attachment.mimetype
+              });
+            } else {
+              await socket.sendMessage(jid, {
+                document: buffer,
+                mimetype: attachment.mimetype,
+                fileName: attachment.filename,
+                caption: attachment.filename
+              });
+            }
+          }
+        } else {
+          await socket.sendMessage(jid, { text: compiledText });
+        }
 
         this.logger.log(`Successfully sent WhatsApp message to ${jid} from ${selectedProvider.phoneNumber}`);
 

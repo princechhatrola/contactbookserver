@@ -8,6 +8,8 @@ import { CreateWhatsappCampaignDto } from '../dto/create-whatsapp-campaign.dto';
 import { UpdateWhatsappCampaignDto } from '../dto/update-whatsapp-campaign.dto';
 import { WhatsappAudienceCompilerService } from './whatsapp-audience-compiler.service';
 import { AuditLogEmitter } from '../../audit-logs/audit-log-emitter';
+import { StorageService } from '../../storage/storage.service';
+import * as fs from 'fs';
 
 @Injectable()
 export class WhatsappCampaignsService extends BaseTenantRepository<WhatsappCampaignDocument> {
@@ -20,6 +22,7 @@ export class WhatsappCampaignsService extends BaseTenantRepository<WhatsappCampa
     private readonly recipientModel: Model<WhatsappCampaignRecipientDocument>,
     private readonly audienceCompilerService: WhatsappAudienceCompilerService,
     private readonly auditLogEmitter: AuditLogEmitter,
+    private readonly storageService: StorageService,
   ) {
     super(campaignModel);
   }
@@ -133,6 +136,7 @@ export class WhatsappCampaignsService extends BaseTenantRepository<WhatsappCampa
       whatsappProviderId: original.whatsappProviderId,
       autoRotate: original.autoRotate,
       segmentFilters: original.segmentFilters,
+      attachments: original.attachments || [],
       status: 'draft',
       totalRecipients: 0,
       sentRecipients: 0,
@@ -281,6 +285,7 @@ export class WhatsappCampaignsService extends BaseTenantRepository<WhatsappCampa
         ...original.segmentFilters,
         contactIds,
       },
+      attachments: original.attachments || [],
       status: 'draft',
       totalRecipients: 0,
       sentRecipients: 0,
@@ -290,5 +295,97 @@ export class WhatsappCampaignsService extends BaseTenantRepository<WhatsappCampa
     });
 
     return duplicated.save();
+  }
+
+  async addAttachment(
+    orgId: string,
+    campaignId: string,
+    file: Express.Multer.File,
+  ): Promise<WhatsappCampaignDocument> {
+    const campaign = await this.getCampaign(orgId, campaignId);
+
+    if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+      throw new BadRequestException(`Cannot add attachments to campaign in "${campaign.status}" status.`);
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Attachment size exceeds the maximum limit of 5MB.');
+    }
+
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const sanitizedFilename = file.originalname.replace(/\s+/g, '_');
+    const s3Key = `whatsapp-campaigns/${campaignId}/attachments/${uniqueSuffix}-${sanitizedFilename}`;
+
+    try {
+      await this.storageService.uploadFile(file.path, s3Key);
+
+      const updated = await this.campaignModel.findByIdAndUpdate(
+        campaignId,
+        {
+          $push: {
+            attachments: {
+              filename: file.originalname,
+              path: s3Key,
+              mimetype: file.mimetype,
+              size: file.size,
+            },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`WhatsApp Campaign with ID ${campaignId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to upload attachment: ${err.message}`);
+    } finally {
+      if (fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (_) {}
+      }
+    }
+  }
+
+  async removeAttachment(
+    orgId: string,
+    campaignId: string,
+    filename: string,
+  ): Promise<WhatsappCampaignDocument> {
+    const campaign = await this.getCampaign(orgId, campaignId);
+
+    if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+      throw new BadRequestException(`Cannot remove attachments from campaign in "${campaign.status}" status.`);
+    }
+
+    const attachment = campaign.attachments?.find((att) => att.filename === filename);
+    if (!attachment) {
+      throw new NotFoundException(`Attachment "${filename}" not found in this campaign.`);
+    }
+
+    try {
+      await this.storageService.deleteFile(attachment.path);
+
+      const updated = await this.campaignModel.findByIdAndUpdate(
+        campaignId,
+        {
+          $pull: {
+            attachments: { filename },
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (!updated) {
+        throw new NotFoundException(`WhatsApp Campaign with ID ${campaignId} not found`);
+      }
+
+      return updated;
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to delete attachment: ${err.message}`);
+    }
   }
 }

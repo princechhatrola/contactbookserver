@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpStatus, HttpCode, BadRequestException, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { WhatsappCampaignsService } from './services/whatsapp-campaigns.service';
 import { WhatsappAudienceCompilerService } from './services/whatsapp-audience-compiler.service';
@@ -8,6 +8,18 @@ import { AudienceSegmentFilterDto } from '../campaigns/dto/audience-segment-filt
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Ensure temporary upload directory exists
+const ATTACHMENT_UPLOAD_DIR = process.env.VERCEL === '1'
+  ? path.join('/tmp', 'uploads', 'whatsapp-attachments')
+  : path.join(process.cwd(), 'uploads', 'whatsapp-attachments');
+if (!fs.existsSync(ATTACHMENT_UPLOAD_DIR)) {
+  fs.mkdirSync(ATTACHMENT_UPLOAD_DIR, { recursive: true });
+}
 
 @ApiTags('WhatsApp Campaigns')
 @ApiBearerAuth()
@@ -153,5 +165,42 @@ export class WhatsappCampaignsController {
       throw new BadRequestException('Status is required for resending');
     }
     return this.campaignsService.createFollowUpCampaign(orgId, userId, id, status, name);
+  }
+
+  @Post(':id/attachments')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: ATTACHMENT_UPLOAD_DIR,
+        filename: (req, file, cb) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, uniqueSuffix + path.extname(file.originalname));
+        },
+      }),
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB Limit
+      },
+    }),
+  )
+  @ApiOperation({ summary: 'Upload a WhatsApp campaign attachment (image, file, video)' })
+  async addAttachment(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    return this.campaignsService.addAttachment(orgId, campaignId, file);
+  }
+
+  @Delete(':id/attachments/:filename')
+  @ApiOperation({ summary: 'Remove a WhatsApp campaign attachment' })
+  async removeAttachment(
+    @GetUser('organizationId') orgId: string,
+    @Param('id') campaignId: string,
+    @Param('filename') filename: string,
+  ) {
+    return this.campaignsService.removeAttachment(orgId, campaignId, filename);
   }
 }
